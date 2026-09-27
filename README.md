@@ -40,12 +40,24 @@ Health: http://localhost:4000/api/health
 
 ```bash
 cd frontend
-# .env.local уже содержит NEXT_PUBLIC_API_URL=http://localhost:4000
 npm install
 npm run dev
 ```
 
 Приложение: http://localhost:3000
+
+Браузер обращается к API через тот же адрес: Next.js проксирует `/api` и `/uploads` на бэкенд
+(`BACKEND_URL`, по умолчанию `http://localhost:4000`), поэтому cookie входа работает на любом домене.
+
+### Показать проект по публичной ссылке
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start-online.ps1   # -Build — пересобрать
+```
+
+Скрипт запускает бэкенд и фронтенд в продакшен-режиме и выдаёт временную ссылку
+`https://….trycloudflare.com`. Ссылка работает, пока открыто окно скрипта и включён компьютер;
+при каждом запуске адрес новый.
 
 ## Демо-аккаунты
 
