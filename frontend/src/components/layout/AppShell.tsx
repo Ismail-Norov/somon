@@ -11,7 +11,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { LoadingState } from '@/components/ui/States';
 
 type Role = 'STUDENT' | 'TEACHER' | 'ADMIN';
-type NavItem = { href: string; label: string; icon: string; badge?: 'notifications' | 'review' };
+type NavItem = { href: string; label: string; icon: string; badge?: 'notifications' | 'review' | 'applications' };
 type NavSection = { title?: string; items: NavItem[] };
 
 const NAV: Record<Role, NavSection[]> = {
@@ -75,18 +75,37 @@ const NAV: Record<Role, NavSection[]> = {
     {
       items: [
         { href: '/admin/dashboard', label: 'Главная', icon: '🏠' },
+        { href: '/admin/notifications', label: 'Уведомления', icon: '🔔', badge: 'notifications' },
+      ],
+    },
+    {
+      title: 'Люди',
+      items: [
         { href: '/admin/users', label: 'Пользователи', icon: '👤' },
+        { href: '/admin/students', label: 'Студенты', icon: '🎓' },
+        { href: '/admin/teachers', label: 'Преподаватели', icon: '🧑‍🏫' },
+        { href: '/admin/applications', label: 'Заявки на курсы', icon: '📨', badge: 'applications' },
+      ],
+    },
+    {
+      title: 'Обучение',
+      items: [
         { href: '/admin/courses', label: 'Курсы', icon: '📚' },
         { href: '/admin/groups', label: 'Группы', icon: '👥' },
         { href: '/admin/schedule', label: 'Расписание', icon: '🗓️' },
+        { href: '/admin/assignments', label: 'Задания', icon: '📝' },
+        { href: '/admin/materials', label: 'Материалы', icon: '📂' },
+        { href: '/admin/announcements', label: 'Объявления', icon: '📢' },
       ],
     },
     {
       title: 'Центр',
       items: [
-        { href: '/admin/branches', label: 'Филиалы', icon: '🏫' },
+        { href: '/admin/branches', label: 'Филиалы и аудитории', icon: '🏫' },
+        { href: '/admin/news', label: 'Новости', icon: '📰' },
         { href: '/admin/statistics', label: 'Статистика', icon: '📊' },
-        { href: '/admin/settings', label: 'Настройки', icon: '⚙️' },
+        { href: '/admin/settings', label: 'Настройки сайта', icon: '⚙️' },
+        { href: '/admin/profile', label: 'Профиль', icon: '🙂' },
       ],
     },
   ],
@@ -95,7 +114,7 @@ const NAV: Record<Role, NavSection[]> = {
 const NOTIFICATIONS_PATH: Record<Role, string> = {
   STUDENT: '/student/notifications',
   TEACHER: '/teacher/notifications',
-  ADMIN: '/admin/dashboard',
+  ADMIN: '/admin/notifications',
 };
 
 export function AppShell({ role, children }: { role: Role; children: React.ReactNode }) {
@@ -103,7 +122,7 @@ export function AppShell({ role, children }: { role: Role; children: React.React
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [counts, setCounts] = useState({ notifications: 0, review: 0 });
+  const [counts, setCounts] = useState({ notifications: 0, review: 0, applications: 0 });
   const [leaving, setLeaving] = useState(false);
 
   useEffect(() => {
@@ -123,6 +142,11 @@ export function AppShell({ role, children }: { role: Role; children: React.React
     if (user.role === 'TEACHER') {
       api<unknown[]>('/api/assignments/submissions/review')
         .then((d) => setCounts((c) => ({ ...c, review: d.length })))
+        .catch(() => undefined);
+    }
+    if (user.role === 'ADMIN') {
+      api<unknown[]>('/api/student/applications?status=PENDING')
+        .then((d) => setCounts((c) => ({ ...c, applications: d.length })))
         .catch(() => undefined);
     }
   }, [user]);
@@ -212,7 +236,7 @@ export function AppShell({ role, children }: { role: Role; children: React.React
                 <span className="bell-count">{counts.notifications > 99 ? '99+' : counts.notifications}</span>
               )}
             </Link>
-            <Link href={role === 'ADMIN' ? '/admin/settings' : `/${role.toLowerCase()}/profile`} className="topbar-user">
+            <Link href={`/${role.toLowerCase()}/profile`} className="topbar-user">
               <Avatar user={user} size={38} />
               <span className="topbar-user-text">
                 <strong>

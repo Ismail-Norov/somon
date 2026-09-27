@@ -95,12 +95,13 @@ router.get(
       where: { groupId, status },
       include: {
         course: true,
-        group: true,
+        group: { include: { teacher: { select: { id: true, user: { select: publicUserSelect } } } } },
         _count: { select: { submissions: true } },
+        submissions: { where: { status: { in: ['SUBMITTED', 'REVIEWING'] } }, select: { id: true } },
       },
       orderBy: { updatedAt: 'desc' },
     });
-    res.json(ok(assignments));
+    res.json(ok(assignments.map(({ submissions, ...a }) => ({ ...a, pendingReview: submissions.length }))));
   })
 );
 

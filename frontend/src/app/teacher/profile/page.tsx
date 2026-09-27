@@ -11,11 +11,13 @@ import { Field, Input, Textarea } from '@/components/ui/Field';
 import { Alert } from '@/components/ui/States';
 import { PageHeader } from '@/components/cabinet/PageHeader';
 import { PhotoUploader } from '@/components/cabinet/PhotoUploader';
+import { PasswordChangeCard } from '@/components/cabinet/PasswordChangeCard';
 
 type Profile = {
   createdAt: string;
   teacher: {
     groups: { id: string; code: string; status: string; course: { title: string }; _count: { groupStudents: number } }[];
+    courses: { id: string; title: string }[];
   } | null;
 };
 
@@ -110,6 +112,18 @@ export default function TeacherProfilePage() {
               <dd>{formatDateLong(profile?.createdAt ?? user.createdAt)}</dd>
             </dl>
           </section>
+          {!!profile?.teacher?.courses?.length && (
+            <section className="card">
+              <h2 className="card-title">Мои курсы</h2>
+              <div className="row" style={{ gap: '0.4rem', flexWrap: 'wrap' }}>
+                {profile.teacher.courses.map((c) => (
+                  <Badge key={c.id} tone="brand">
+                    {c.title}
+                  </Badge>
+                ))}
+              </div>
+            </section>
+          )}
           <section className="card">
             <h2 className="card-title">Мои группы</h2>
             {!profile?.teacher?.groups.length ? (
@@ -130,6 +144,7 @@ export default function TeacherProfilePage() {
               </ul>
             )}
           </section>
+          <PasswordChangeCard />
         </aside>
       </div>
     </div>

@@ -246,6 +246,13 @@ async function main() {
     )
   );
 
+  for (const g of groupDefs) {
+    await prisma.teacher.update({
+      where: { id: g.teacherId },
+      data: { courses: { connect: { id: g.courseId } } },
+    });
+  }
+
   // Enroll students into groups (linked)
   const enrollments: { groupId: string; studentIds: string[] }[] = [
     { groupId: groups[0].id, studentIds: studentUsers.slice(0, 6).map((s) => s.student!.id) },

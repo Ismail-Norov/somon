@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { CourseLevel, MaterialType, Role } from '@prisma/client';
+import { Prisma, Role } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { publicUserSelect } from '../lib/selects';
 import { AppError, ok } from '../lib/errors';
@@ -69,45 +69,29 @@ router.get(
   requireRole(Role.STUDENT, Role.TEACHER, Role.ADMIN),
   asyncHandler(async (req, res) => {
     const category = req.query.category as string | undefined;
+    let access: Prisma.PublicMaterialWhereInput = {};
+    if (req.user!.role === Role.STUDENT) {
+      access = {
+        OR: [
+          { isPublic: true },
+          {
+            course: {
+              groups: {
+                some: { groupStudents: { some: { studentId: req.user!.studentId, status: 'ACTIVE' } } },
+              },
+            },
+          },
+        ],
+      };
+    } else if (req.user!.role === Role.TEACHER) {
+      access = { OR: [{ isPublic: true }, { course: { groups: { some: { teacherId: req.user!.teacherId } } } }] };
+    }
     const items = await prisma.publicMaterial.findMany({
-      where: category ? { category } : undefined,
+      where: { AND: [access, category ? { category } : {}] },
       include: { author: { select: { firstName: true, lastName: true } } },
       orderBy: { publishedAt: 'desc' },
     });
     res.json(ok(items));
-  })
-);
-
-router.post(
-  '/library',
-  requireRole(Role.ADMIN),
-  asyncHandler(async (req, res) => {
-    const body = z
-      .object({
-        title: z.string().min(1),
-        description: z.string().optional(),
-        category: z.string().min(1),
-        type: z.nativeEnum(MaterialType).optional(),
-        level: z.nativeEnum(CourseLevel).optional(),
-        fileUrl: z.string().optional().nullable(),
-        fileName: z.string().optional().nullable(),
-        linkUrl: z.string().optional().nullable(),
-      })
-      .parse(req.body);
-    const item = await prisma.publicMaterial.create({
-      data: {
-        title: body.title,
-        description: body.description,
-        category: body.category,
-        type: body.type ?? MaterialType.NOTE,
-        level: body.level ?? CourseLevel.BEGINNER,
-        fileUrl: body.fileUrl,
-        fileName: body.fileName,
-        linkUrl: body.linkUrl,
-        authorId: req.user!.id,
-      },
-    });
-    res.status(201).json(ok(item));
   })
 );
 
@@ -256,7 +240,7 @@ router.post(
       'APPLICATION',
       'Заявка на обучение',
       `${req.user!.firstName} ${req.user!.lastName} подал заявку на «${course.title}»`,
-      '/admin/groups'
+      '/admin/applications'
     );
     await logActivity(req.user!.studentId, 'APPLICATION', `Заявка на курс «${course.title}»`);
     res.status(201).json(ok(app));
@@ -275,14 +259,24 @@ router.get(
       });
       return res.json(ok(items));
     }
+    const statusParam = req.query.status as string | undefined;
+    const status = statusParam && ['PENDING', 'APPROVED', 'REJECTED'].includes(statusParam)
+      ? (statusParam as 'PENDING' | 'APPROVED' | 'REJECTED')
+      : undefined;
     const items = await prisma.courseApplication.findMany({
+      where: { status },
       include: {
-        course: true,
+        course: { select: { id: true, title: true, status: true } },
         student: { include: { user: { select: publicUserSelect } } },
       },
       orderBy: { createdAt: 'desc' },
     });
-    res.json(ok(items));
+    const groupIds = [...new Set(items.map((i) => i.groupId).filter((id): id is string => !!id))];
+    const groups = groupIds.length
+      ? await prisma.group.findMany({ where: { id: { in: groupIds } }, select: { id: true, code: true } })
+      : [];
+    const groupById = new Map(groups.map((g) => [g.id, g]));
+    res.json(ok(items.map((i) => ({ ...i, group: i.groupId ? groupById.get(i.groupId) ?? null : null }))));
   })
 );
 
@@ -290,43 +284,83 @@ router.patch(
   '/applications/:id',
   requireRole(Role.ADMIN),
   asyncHandler(async (req, res) => {
-    const body = z.object({ status: z.enum(['APPROVED', 'REJECTED', 'PENDING']) }).parse(req.body);
+    const body = z
+      .object({
+        status: z.enum(['APPROVED', 'REJECTED', 'PENDING']),
+        groupId: z.string().optional().nullable(),
+        comment: z.string().trim().max(500).optional(),
+      })
+      .parse(req.body);
     const existing = await prisma.courseApplication.findUnique({
       where: { id: req.params.id },
       include: { course: true, student: true },
     });
     if (!existing) throw new AppError('Заявка не найдена', 404, 'NOT_FOUND');
 
-    const updated = await prisma.courseApplication.update({
-      where: { id: existing.id },
-      data: { status: body.status },
-    });
-
-    if (body.status === 'APPROVED' && existing.groupId) {
-      await prisma.groupStudent.upsert({
-        where: {
-          groupId_studentId: { groupId: existing.groupId, studentId: existing.studentId },
-        },
-        create: { groupId: existing.groupId, studentId: existing.studentId },
-        update: { status: 'ACTIVE' },
+    const groupId = body.groupId || existing.groupId;
+    let groupCode: string | null = null;
+    if (body.status === 'APPROVED') {
+      if (!groupId) {
+        throw new AppError('Выберите группу, в которую зачислить студента', 400, 'GROUP_REQUIRED');
+      }
+      const group = await prisma.group.findUnique({
+        where: { id: groupId },
+        include: { _count: { select: { groupStudents: { where: { status: 'ACTIVE' } } } } },
       });
-      await prisma.enrollment.upsert({
-        where: {
-          studentId_courseId: { studentId: existing.studentId, courseId: existing.courseId },
-        },
-        create: { studentId: existing.studentId, courseId: existing.courseId },
-        update: { status: 'ACTIVE' },
+      if (!group || group.courseId !== existing.courseId) {
+        throw new AppError('Группа не относится к курсу заявки', 400, 'GROUP_MISMATCH');
+      }
+      if (group.status === 'COMPLETED' || group.status === 'ARCHIVED') {
+        throw new AppError('Группа завершена или в архиве', 400, 'GROUP_CLOSED');
+      }
+      const alreadyIn = await prisma.groupStudent.findUnique({
+        where: { groupId_studentId: { groupId: group.id, studentId: existing.studentId } },
       });
+      if (alreadyIn?.status !== 'ACTIVE' && group._count.groupStudents >= group.capacity) {
+        throw new AppError('В группе нет свободных мест. Увеличьте вместимость или выберите другую группу.', 409, 'CAPACITY');
+      }
+      groupCode = group.code;
     }
 
+    const updated = await prisma.$transaction(async (tx) => {
+      const app = await tx.courseApplication.update({
+        where: { id: existing.id },
+        data: { status: body.status, groupId: groupId ?? null },
+      });
+      if (body.status === 'APPROVED' && groupId) {
+        await tx.groupStudent.upsert({
+          where: { groupId_studentId: { groupId, studentId: existing.studentId } },
+          create: { groupId, studentId: existing.studentId },
+          update: { status: 'ACTIVE' },
+        });
+        await tx.enrollment.upsert({
+          where: { studentId_courseId: { studentId: existing.studentId, courseId: existing.courseId } },
+          create: { studentId: existing.studentId, courseId: existing.courseId },
+          update: { status: 'ACTIVE' },
+        });
+      }
+      return app;
+    });
+
     if (body.status !== 'PENDING') {
+      const approved = body.status === 'APPROVED';
+      const details = [
+        `Курс «${existing.course.title}»`,
+        approved && groupCode ? `группа ${groupCode}` : null,
+        body.comment || null,
+      ]
+        .filter(Boolean)
+        .join('. ');
       await notifyUser(
         existing.student.userId,
         'APPLICATION',
-        body.status === 'APPROVED' ? 'Заявка одобрена' : 'Заявка отклонена',
-        `Курс «${existing.course.title}»`,
-        body.status === 'APPROVED' && existing.groupId ? '/student/courses' : '/student/catalog'
+        approved ? 'Заявка одобрена' : 'Заявка отклонена',
+        details,
+        approved ? '/student/courses' : '/student/catalog'
       );
+      if (approved) {
+        await logActivity(existing.studentId, 'ENROLLMENT', `Зачислен на курс «${existing.course.title}»`);
+      }
     }
     await audit(req.user!.id, 'UPDATE', 'CourseApplication', existing.id, body);
     res.json(ok(updated));

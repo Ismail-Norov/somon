@@ -13,6 +13,7 @@ import { Field, Input } from '@/components/ui/Field';
 import { Alert, LoadingState } from '@/components/ui/States';
 import { PageHeader } from '@/components/cabinet/PageHeader';
 import { PhotoUploader } from '@/components/cabinet/PhotoUploader';
+import { PasswordChangeCard } from '@/components/cabinet/PasswordChangeCard';
 
 type Profile = {
   createdAt: string;
@@ -151,6 +152,7 @@ export default function StudentProfilePage() {
               </ul>
             )}
           </section>
+          <PasswordChangeCard />
         </aside>
       </div>
     </div>

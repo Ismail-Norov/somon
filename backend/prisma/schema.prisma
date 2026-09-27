@@ -168,6 +168,7 @@ model Teacher {
   groups  Group[]
   grades  Grade[]
   lessons Lesson[]
+  courses Course[] @relation("TeacherCourses")
 
   @@index([userId])
 }
@@ -204,6 +205,8 @@ model Course {
   enrollments        Enrollment[]
   courseApplications CourseApplication[]
   publicMaterials    PublicMaterial[]
+  /// Teachers assigned to the course by admin (in addition to teachers of its groups)
+  teachers           Teacher[]           @relation("TeacherCourses")
 
   @@index([status])
   @@index([categoryId])

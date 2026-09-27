@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useApiData } from '@/lib/useApiData';
-import type { Material } from '@/lib/types';
+import type { Material, PublicMaterial } from '@/lib/types';
+import { PublicMaterialCard } from '@/components/public/Cards';
 import { materialTypeLabel } from '@/lib/format';
 import { Input, Select } from '@/components/ui/Field';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/States';
@@ -10,6 +11,38 @@ import { PageHeader } from '@/components/cabinet/PageHeader';
 import { MaterialCard } from '@/components/cabinet/MaterialCard';
 
 export default function StudentMaterialsPage() {
+  const [tab, setTab] = useState<'course' | 'library'>('course');
+  return (
+    <div>
+      <PageHeader title="Материалы" subtitle="Конспекты, презентации, видео и ссылки от преподавателей ваших групп и библиотека Somon." />
+      <div className="tabs" role="tablist">
+        <button type="button" role="tab" aria-selected={tab === 'course'} className={`tab ${tab === 'course' ? 'active' : ''}`} onClick={() => setTab('course')}>
+          Материалы курсов
+        </button>
+        <button type="button" role="tab" aria-selected={tab === 'library'} className={`tab ${tab === 'library' ? 'active' : ''}`} onClick={() => setTab('library')}>
+          Библиотека Somon
+        </button>
+      </div>
+      {tab === 'course' ? <CourseMaterials /> : <Library />}
+    </div>
+  );
+}
+
+function Library() {
+  const { data, loading, error, reload } = useApiData<PublicMaterial[]>('/api/student/library');
+  if (loading) return <LoadingState />;
+  if (error) return <ErrorState message={error} onRetry={reload} />;
+  if (!data?.length) return <EmptyState icon="📚" title="Материалов пока нет" description="Здесь появятся открытые материалы Somon и материалы для студентов ваших курсов." />;
+  return (
+    <div className="grid grid-3">
+      {data.map((m) => (
+        <PublicMaterialCard key={m.id} material={m} />
+      ))}
+    </div>
+  );
+}
+
+function CourseMaterials() {
   const [q, setQ] = useState('');
   const [debounced, setDebounced] = useState('');
   const [courseId, setCourseId] = useState('');
@@ -37,8 +70,6 @@ export default function StudentMaterialsPage() {
 
   return (
     <div>
-      <PageHeader title="Материалы" subtitle="Конспекты, презентации, видео и ссылки от преподавателей ваших групп." />
-
       <div className="card filters" style={{ marginBottom: '1rem' }}>
         <Input placeholder="Поиск по названию или теме" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Поиск" />
         <Select value={courseId} onChange={(e) => setCourseId(e.target.value)} aria-label="Курс">

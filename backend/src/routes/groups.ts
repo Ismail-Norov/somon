@@ -212,6 +212,16 @@ router.patch(
   requireRole(Role.ADMIN),
   asyncHandler(async (req, res) => {
     const body = groupSchema.partial().parse(req.body);
+    const existing = await prisma.group.findUnique({ where: { id: req.params.id } });
+    if (!existing) throw new AppError('Группа не найдена', 404, 'NOT_FOUND');
+    if (body.code && body.code !== existing.code && (await prisma.group.findUnique({ where: { code: body.code } }))) {
+      throw new AppError('Код группы уже существует', 409, 'CODE_TAKEN');
+    }
+    const start = body.startDate === undefined ? existing.startDate : body.startDate ? new Date(body.startDate) : null;
+    const end = body.endDate === undefined ? existing.endDate : body.endDate ? new Date(body.endDate) : null;
+    if (start && end && end < start) {
+      throw new AppError('Дата окончания раньше даты начала', 400, 'INVALID_DATES');
+    }
     const group = await prisma.group.update({
       where: { id: req.params.id },
       data: {
@@ -227,6 +237,18 @@ router.patch(
         adminNote: body.adminNote,
       },
     });
+    if (body.teacherId && body.teacherId !== existing.teacherId) {
+      const teacher = await prisma.teacher.findUnique({ where: { id: body.teacherId } });
+      if (teacher) {
+        await notifyUser(
+          teacher.userId,
+          'GROUP',
+          'Вам назначена группа',
+          `Группа ${group.code}`,
+          `/teacher/groups/${group.id}`
+        );
+      }
+    }
     await audit(req.user!.id, 'UPDATE', 'Group', group.id, body);
     res.json(ok(group));
   })
@@ -248,6 +270,8 @@ router.post(
     if (group._count.groupStudents >= group.capacity) {
       throw new AppError('Группа заполнена. Требуется явное административное расширение вместимости.', 409, 'CAPACITY');
     }
+    const student = await prisma.student.findUnique({ where: { id: studentId } });
+    if (!student) throw new AppError('Студент не найден', 404, 'NOT_FOUND');
 
     const link = await prisma.groupStudent.upsert({
       where: { groupId_studentId: { groupId: group.id, studentId } },
@@ -259,11 +283,12 @@ router.post(
       create: { studentId, courseId: group.courseId },
       update: { status: 'ACTIVE' },
     });
+    await prisma.courseApplication.updateMany({
+      where: { studentId, courseId: group.courseId, status: 'PENDING' },
+      data: { status: 'APPROVED', groupId: group.id },
+    });
 
-    const student = await prisma.student.findUnique({ where: { id: studentId } });
-    if (student) {
-      await notifyUser(student.userId, 'ENROLLMENT', 'Запись в группу', `Вы добавлены в группу ${group.code}`);
-    }
+    await notifyUser(student.userId, 'ENROLLMENT', 'Запись в группу', `Вы добавлены в группу ${group.code}`, '/student/courses');
     await audit(req.user!.id, 'ADD_STUDENT', 'Group', group.id, { studentId });
     res.status(201).json(ok(link));
   })

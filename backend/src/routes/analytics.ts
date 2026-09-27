@@ -521,11 +521,48 @@ router.get(
     const avgGrade = grades.length ? grades.reduce((s, g) => s + (g.score / g.maxScore) * 5, 0) / grades.length : null;
 
     const teacherLoad = await prisma.teacher.findMany({
+      where: { user: { status: 'ACTIVE' } },
       include: {
         user: { select: publicUserSelect },
         groups: { where: { status: { in: ['ACTIVE', 'ENROLLMENT'] } } },
       },
     });
+
+    const [applicationsPending, recentApplications, todayLessons, recentActions, newsPublished] = await Promise.all([
+      prisma.courseApplication.count({ where: { status: 'PENDING' } }),
+      prisma.courseApplication.findMany({
+        where: { status: 'PENDING' },
+        include: {
+          course: { select: { id: true, title: true } },
+          student: { select: { user: { select: publicUserSelect } } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+      }),
+      prisma.lesson.findMany({
+        where: { startsAt: { gte: startOfDay, lte: endOfDay } },
+        include: {
+          group: {
+            select: {
+              code: true,
+              course: { select: { title: true } },
+              teacher: { select: { user: { select: publicUserSelect } } },
+            },
+          },
+          teacher: { select: { user: { select: publicUserSelect } } },
+          classroom: { select: { name: true } },
+          branch: { select: { name: true } },
+        },
+        orderBy: { startsAt: 'asc' },
+        take: 12,
+      }),
+      prisma.auditLog.findMany({
+        include: { user: { select: { firstName: true, lastName: true, role: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      }),
+      prisma.news.count({ where: { isPublished: true } }),
+    ]);
 
     res.json(
       ok({
@@ -543,6 +580,33 @@ router.get(
           name: `${t.user.firstName} ${t.user.lastName}`,
           photoUrl: t.user.photoUrl,
           groups: t.groups.length,
+        })),
+        applicationsPending,
+        newsPublished,
+        recentApplications: recentApplications.map((a) => ({
+          id: a.id,
+          createdAt: a.createdAt,
+          course: a.course,
+          student: a.student.user,
+        })),
+        todayLessons: todayLessons.map((l) => ({
+          id: l.id,
+          title: l.title,
+          startsAt: l.startsAt,
+          endsAt: l.endsAt,
+          status: l.status,
+          format: l.format,
+          groupCode: l.group.code,
+          courseTitle: l.group.course.title,
+          teacher: (l.teacher ?? l.group.teacher)?.user ?? null,
+          place: l.format === 'ONLINE' ? 'Онлайн' : [l.branch?.name, l.classroom?.name].filter(Boolean).join(', ') || null,
+        })),
+        recentActions: recentActions.map((a) => ({
+          id: a.id,
+          action: a.action,
+          entityType: a.entityType,
+          createdAt: a.createdAt,
+          user: a.user,
         })),
       })
     );

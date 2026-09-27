@@ -2923,3 +2923,72 @@ table.data th {
     border-radius: 14px;
   }
 }
+
+/* ---------- Admin tables & forms ---------- */
+.person-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 180px;
+}
+
+.person-cell small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.table-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.35rem 0.75rem;
+  max-height: 220px;
+  overflow: auto;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.check-grid label,
+.check-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.92rem;
+  cursor: pointer;
+}
+
+.badge-row {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.news-thumb {
+  width: 72px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--brand-softer);
+  flex-shrink: 0;
+}
+
+.settings-section + .settings-section {
+  margin-top: 0.5rem;
+}
+
+@media (max-width: 640px) {
+  .table-actions {
+    justify-content: flex-start;
+  }
+  .person-cell {
+    min-width: 140px;
+  }
+}

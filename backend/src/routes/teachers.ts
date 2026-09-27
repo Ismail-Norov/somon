@@ -21,12 +21,14 @@ export async function listPublicTeachers(take?: number, id?: string) {
         where: { course: { status: 'PUBLISHED' }, status: { not: 'ARCHIVED' } },
         select: { course: { select: { id: true, title: true } } },
       },
+      courses: { where: { status: 'PUBLISHED' }, select: { id: true, title: true } },
     },
     orderBy: { createdAt: 'asc' },
     take,
   });
-  return teachers.map(({ groups, ...t }) => {
+  return teachers.map(({ groups, courses: assigned, ...t }) => {
     const courses = new Map<string, { id: string; title: string }>();
+    for (const c of assigned) courses.set(c.id, c);
     for (const g of groups) courses.set(g.course.id, g.course);
     return { ...t, courses: [...courses.values()] };
   });
@@ -54,14 +56,36 @@ router.get(
   '/',
   requireRole(Role.ADMIN),
   asyncHandler(async (_req, res) => {
+    const now = new Date();
     const teachers = await prisma.teacher.findMany({
       include: {
-        user: { select: { firstName: true, lastName: true, email: true, status: true, photoUrl: true } },
+        user: { select: { id: true, firstName: true, lastName: true, email: true, status: true, photoUrl: true } },
+        groups: {
+          where: { status: { not: 'ARCHIVED' } },
+          select: {
+            id: true,
+            code: true,
+            status: true,
+            course: { select: { id: true, title: true } },
+            _count: { select: { groupStudents: { where: { status: 'ACTIVE' } } } },
+          },
+          orderBy: { code: 'asc' },
+        },
+        courses: { select: { id: true, title: true, status: true } },
         _count: { select: { groups: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
-    res.json(ok(teachers));
+    const upcoming = await prisma.lesson.findMany({
+      where: { startsAt: { gte: now }, status: 'SCHEDULED' },
+      select: { teacherId: true, group: { select: { teacherId: true } } },
+    });
+    const upcomingByTeacher = new Map<string, number>();
+    for (const l of upcoming) {
+      const tid = l.teacherId ?? l.group.teacherId;
+      if (tid) upcomingByTeacher.set(tid, (upcomingByTeacher.get(tid) ?? 0) + 1);
+    }
+    res.json(ok(teachers.map((t) => ({ ...t, upcomingLessons: upcomingByTeacher.get(t.id) ?? 0 }))));
   })
 );
 

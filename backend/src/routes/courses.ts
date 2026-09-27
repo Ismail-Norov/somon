@@ -30,6 +30,10 @@ export const publicCourseInclude = {
     },
     orderBy: { startDate: 'asc' as const },
   },
+  teachers: {
+    where: { isPublic: true, user: { status: 'ACTIVE' as const } },
+    select: { id: true, specialization: true, position: true, user: { select: siteUserSelect } },
+  },
 } satisfies Prisma.CourseInclude;
 
 type PublicCourseRow = Prisma.CourseGetPayload<{ include: typeof publicCourseInclude }>;
@@ -39,6 +43,7 @@ export function serializePublicCourse(course: PublicCourseRow) {
   for (const g of course.groups) {
     if (g.teacher) teachers.set(g.teacher.id, g.teacher);
   }
+  for (const t of course.teachers) teachers.set(t.id, t);
   return {
     ...course,
     teachers: [...teachers.values()],
@@ -132,7 +137,8 @@ router.get(
         },
         include: {
           category: true,
-          _count: { select: { groups: true } },
+          teachers: { select: { id: true, user: { select: publicUserSelect } } },
+          _count: { select: { groups: true, enrollments: { where: { status: 'ACTIVE' } } } },
         },
         orderBy: { updatedAt: 'desc' },
       });

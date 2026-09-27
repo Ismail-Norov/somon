@@ -21,6 +21,7 @@ import publicRoutes from './routes/public';
 import newsRoutes from './routes/news';
 import settingsRoutes from './routes/settings';
 import branchesRoutes from './routes/branches';
+import publicMaterialsRoutes from './routes/public-materials';
 import { errorHandler } from './middleware/error';
 import { requireAuth } from './middleware/auth';
 import { ok } from './lib/errors';
@@ -82,6 +83,7 @@ export function createApp() {
   app.use('/api/news', newsRoutes);
   app.use('/api/settings', settingsRoutes);
   app.use('/api/branches', branchesRoutes);
+  app.use('/api/public-materials', publicMaterialsRoutes);
 
   app.use(errorHandler);
   return app;
