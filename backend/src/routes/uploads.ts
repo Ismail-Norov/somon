@@ -1,147 +1,90 @@
 import { Router } from 'express';
-import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
-import { z } from 'zod';
 import { Role } from '@prisma/client';
 import { AppError, ok } from '../lib/errors';
 import { asyncHandler } from '../middleware/error';
 import { requireAuth, requireRole } from '../middleware/auth';
+import { createUploader, EXTENSION_SETS, handleUpload, MAX_FILE_MB } from '../lib/uploads';
 
 const router = Router();
+router.use(requireAuth);
 
-const uploadDir = path.resolve(process.env.UPLOAD_DIR || 'uploads');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-
-const ALLOWED = new Set([
-  '.pdf',
-  '.docx',
-  '.pptx',
-  '.xlsx',
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.gif',
-  '.webp',
-  '.txt',
-]);
-
-const ASSIGNMENT_ALLOWED = new Set([
-  '.pdf',
-  '.docx',
-  '.doc',
-  '.pptx',
-  '.ppt',
-  '.xlsx',
-  '.xls',
-  '.zip',
-  '.rar',
-  '.txt',
-]);
-
-const MATERIAL_ALLOWED = new Set([
-  '.pdf',
-  '.docx',
-  '.doc',
-  '.pptx',
-  '.ppt',
-  '.txt',
-]);
-
-const maxMb = Number(process.env.MAX_FILE_SIZE_MB || 10);
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
-  filename: (_req, file, cb) => {
-    const safe = file.originalname.replace(/[^a-zA-Z0-9._\-\u0400-\u04FF]/g, '_');
-    cb(null, `${Date.now()}-${safe}`);
-  },
+const generalUploader = createUploader({ dir: 'files', extensions: EXTENSION_SETS.general });
+const assignmentUploader = createUploader({ dir: 'private/assignments', extensions: EXTENSION_SETS.assignment });
+const materialUploader = createUploader({ dir: 'private/materials', extensions: EXTENSION_SETS.material, maxFiles: 10 });
+const publicUploader = createUploader({
+  dir: 'public',
+  extensions: [...EXTENSION_SETS.image, '.pdf', '.docx', '.pptx', '.xlsx', '.zip'],
 });
 
-const upload = multer({
-  storage,
-  limits: { fileSize: maxMb * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (!ALLOWED.has(ext)) {
-      return cb(new AppError('Недопустимый тип файла', 400, 'INVALID_FILE_TYPE') as unknown as Error);
-    }
-    cb(null, true);
-  },
-});
+function firstFile(req: Express.Request) {
+  const file = req.storedFiles?.[0];
+  if (!file) throw new AppError('Файл не загружен', 400, 'NO_FILE');
+  return { url: file.url, fileUrl: file.url, fileName: file.originalName, size: file.size, mimeType: file.mimeType };
+}
 
-const assignmentUpload = multer({
-  storage,
-  limits: { fileSize: maxMb * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (!ASSIGNMENT_ALLOWED.has(ext)) {
-      return cb(new AppError('Для заданий разрешены только PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX, ZIP, RAR, TXT', 400, 'INVALID_FILE_TYPE') as unknown as Error);
-    }
-    cb(null, true);
-  },
-});
-
-const materialUpload = multer({
-  storage,
-  limits: { fileSize: maxMb * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (!MATERIAL_ALLOWED.has(ext)) {
-      return cb(new AppError('Для материалов разрешены только PDF, DOC, DOCX, PPT, PPTX, TXT', 400, 'INVALID_FILE_TYPE') as unknown as Error);
-    }
-    cb(null, true);
-  },
-});
-
-router.post(
-  '/',
-  requireAuth,
-  requireRole(Role.ADMIN, Role.TEACHER, Role.STUDENT),
-  upload.single('file'),
-  asyncHandler(async (req, res) => {
-    if (!req.file) throw new AppError('Файл не загружен', 400, 'NO_FILE');
-    res.status(201).json(
+router.get(
+  '/rules',
+  asyncHandler(async (_req, res) => {
+    const describe = (list: readonly string[]) => ({
+      extensions: list.map((e) => e.slice(1).toUpperCase()),
+      accept: list.join(','),
+      maxFileMb: MAX_FILE_MB,
+    });
+    res.json(
       ok({
-        url: `/uploads/${req.file.filename}`,
-        fileName: req.file.originalname,
-        size: req.file.size,
+        submission: { ...describe(EXTENSION_SETS.submission), maxFiles: 5 },
+        assignment: describe(EXTENSION_SETS.assignment),
+        material: { ...describe(EXTENSION_SETS.material), maxFiles: 10 },
+        image: describe(EXTENSION_SETS.image),
       })
     );
   })
 );
 
 router.post(
-  '/assignment',
-  requireAuth,
-  requireRole(Role.ADMIN, Role.TEACHER, Role.STUDENT),
-  assignmentUpload.single('file'),
+  '/',
+  requireRole(Role.ADMIN, Role.TEACHER),
+  handleUpload(generalUploader, { single: 'file' }),
   asyncHandler(async (req, res) => {
-    if (!req.file) throw new AppError('Файл не загружен', 400, 'NO_FILE');
-    res.status(201).json(
-      ok({
-        fileUrl: `/uploads/${req.file.filename}`,
-        fileName: req.file.originalname,
-        size: req.file.size,
-      })
-    );
+    res.status(201).json(ok(firstFile(req)));
+  })
+);
+
+/** Instruction file attached to an assignment by the teacher (served via /api/files/assignment/:id). */
+router.post(
+  '/assignment',
+  requireRole(Role.ADMIN, Role.TEACHER),
+  handleUpload(assignmentUploader, { single: 'file' }),
+  asyncHandler(async (req, res) => {
+    res.status(201).json(ok(firstFile(req)));
   })
 );
 
 router.post(
   '/material',
-  requireAuth,
   requireRole(Role.ADMIN, Role.TEACHER),
-  materialUpload.single('file'),
+  handleUpload(materialUploader, { array: 'files', max: 10 }),
   asyncHandler(async (req, res) => {
-    if (!req.file) throw new AppError('Файл не загружен', 400, 'NO_FILE');
-    res.status(201).json(
-      ok({
-        fileUrl: `/uploads/${req.file.filename}`,
-        fileName: req.file.originalname,
-        size: req.file.size,
-      })
-    );
+    const files = (req.storedFiles ?? []).map((f) => ({
+      url: f.url,
+      fileUrl: f.url,
+      fileName: f.originalName,
+      originalName: f.originalName,
+      size: f.size,
+      mimeType: f.mimeType,
+    }));
+    if (!files.length) throw new AppError('Файл не загружен', 400, 'NO_FILE');
+    res.status(201).json(ok({ ...files[0], files }));
+  })
+);
+
+/** Files for the public site (news images, open materials). */
+router.post(
+  '/public',
+  requireRole(Role.ADMIN),
+  handleUpload(publicUploader, { single: 'file' }),
+  asyncHandler(async (req, res) => {
+    res.status(201).json(ok(firstFile(req)));
   })
 );
 

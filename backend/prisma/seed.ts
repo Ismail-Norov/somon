@@ -1,11 +1,46 @@
 import { PrismaClient, Role, UserStatus, CourseStatus, CourseLevel, GroupStatus, LearningFormat, LessonStatus, AssignmentStatus, SubmissionStatus, AttendanceStatus, MaterialType, GroupStudentStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import fs from 'fs';
+import path from 'path';
 
 const prisma = new PrismaClient();
 const DEMO_PASSWORD = 'Somon123!';
+const UPLOAD_ROOT = path.resolve(process.env.UPLOAD_DIR || 'uploads');
+
+const DEMO_PDF = `%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj
+4 0 obj<</Length 58>>stream
+BT /F1 22 Tf 60 780 Td (Somon - demo material) Tj ET
+endstream endobj
+5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
+trailer<</Root 1 0 R>>
+%%EOF
+`;
+
+/** Writes a demo file into uploads/private/<dir> and returns the DB fields for it. */
+function demoFile(dir: string, fileName: string, originalName: string, content: string, mimeType: string) {
+  const absDir = path.join(UPLOAD_ROOT, 'private', dir);
+  fs.mkdirSync(absDir, { recursive: true });
+  fs.writeFileSync(path.join(absDir, fileName), content, 'utf8');
+  return {
+    url: `/uploads/private/${dir}/${fileName}`,
+    originalName,
+    size: Buffer.byteLength(content, 'utf8'),
+    mimeType,
+  };
+}
 
 async function main() {
   console.log('Seeding Somon database...');
+  for (const dir of ['materials', 'submissions']) {
+    const absDir = path.join(UPLOAD_ROOT, 'private', dir);
+    if (!fs.existsSync(absDir)) continue;
+    for (const name of fs.readdirSync(absDir)) {
+      if (name.startsWith('seed-')) fs.unlinkSync(path.join(absDir, name));
+    }
+  }
   await prisma.submissionFile.deleteMany();
   await prisma.submissionAttempt.deleteMany();
   await prisma.materialFile.deleteMany();
@@ -273,19 +308,39 @@ async function main() {
   for (const [ci, course] of courses.slice(0, 5).entries()) {
     const group = groups[ci];
     const author = teacherUsers.find((t) => t.teacher!.id === group.teacherId) ?? teacherUsers[0];
+    const groupLessons = lessons.filter((l) => l.groupId === group.id);
     for (let i = 0; i < 4; i++) {
+      const files =
+        i === 0
+          ? [
+              demoFile('materials', `seed-${ci}-${i}-konspekt.pdf`, `Конспект урока ${i + 1}.pdf`, DEMO_PDF, 'application/pdf'),
+              demoFile(
+                'materials',
+                `seed-${ci}-${i}-zadachi.txt`,
+                `Задачи для практики ${i + 1}.txt`,
+                `${course.title}\nУрок ${i + 1}: ${lessonTopics[i]}\n\n1. Повторите конспект.\n2. Выполните примеры из урока.\n3. Подготовьте вопросы к следующему занятию.\n`,
+                'text/plain'
+              ),
+            ]
+          : i === 2
+            ? [demoFile('materials', `seed-${ci}-${i}-prezentaciya.pdf`, `Презентация — ${lessonTopics[i]}.pdf`, DEMO_PDF, 'application/pdf')]
+            : [];
       await prisma.material.create({
         data: {
           courseId: course.id,
           groupId: group.id,
+          lessonId: groupLessons[i]?.id,
           title: `Урок ${i + 1}. ${lessonTopics[i]} — ${course.title}`,
           description: 'Конспект урока, примеры и ссылки для самостоятельной подготовки.',
           topic: lessonTopics[i],
-          type: i === 1 ? MaterialType.VIDEO : i === 3 ? MaterialType.LINK : MaterialType.NOTE,
+          type: i === 1 ? MaterialType.VIDEO : i === 3 ? MaterialType.LINK : files.length ? MaterialType.PDF : MaterialType.NOTE,
           videoUrl: i === 1 ? 'https://www.youtube.com/watch?v=W6NZfCO5SIk' : null,
           linkUrl: i === 3 ? 'https://developer.mozilla.org/ru/' : null,
+          fileUrl: files[0]?.url ?? null,
+          fileName: files[0]?.originalName ?? null,
           sortOrder: i,
           authorId: author.id,
+          files: { create: files },
         },
       });
     }
@@ -317,18 +372,34 @@ async function main() {
     for (let i = 0; i < members.length; i++) {
       const m = members[i];
       if (i % 5 === 4) continue; // some not submitted
-      const submitted = true;
       const graded = i % 2 === 0;
+      const file =
+        i % 3 === 0
+          ? demoFile(
+              'submissions',
+              `seed-${a.id}-${m.studentId}.txt`,
+              'Ответ на задание.txt',
+              `Ответ на «${a.title}»\n\nРешение выполнено по критериям: корректность, полнота, оформление.\n`,
+              'text/plain'
+            )
+          : null;
       const submission = await prisma.submission.create({
         data: {
           assignmentId: a.id,
           studentId: m.studentId,
           text: 'Мой ответ на задание Somon',
+          fileUrl: file?.url ?? null,
+          fileName: file?.originalName ?? null,
           submittedAt: days(-2),
           status: graded ? SubmissionStatus.GRADED : SubmissionStatus.SUBMITTED,
           attemptCount: 1,
           attempts: {
-            create: { number: 1, text: 'Мой ответ на задание Somon', submittedAt: days(-2) },
+            create: {
+              number: 1,
+              text: 'Мой ответ на задание Somon',
+              submittedAt: days(-2),
+              files: file ? { create: file } : undefined,
+            },
           },
         },
       });

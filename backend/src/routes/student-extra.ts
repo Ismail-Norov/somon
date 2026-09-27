@@ -6,7 +6,7 @@ import { publicUserSelect } from '../lib/selects';
 import { AppError, ok } from '../lib/errors';
 import { asyncHandler } from '../middleware/error';
 import { requireAuth, requireRole } from '../middleware/auth';
-import { assertStudentInGroup, assertTeacherOwnsGroup } from '../services/access';
+import { assertCanReadMaterial, assertStudentInGroup, assertTeacherOwnsGroup } from '../services/access';
 import { audit, getGroupStudentUserIds, notifyUser, notifyUsers } from '../services/notifications';
 import { ensureAchievements, logActivity } from '../services/activity';
 
@@ -31,9 +31,12 @@ router.post(
   requireRole(Role.STUDENT),
   asyncHandler(async (req, res) => {
     const body = z
-      .object({ type: z.string().max(40), title: z.string().max(300), meta: z.unknown().optional() })
+      .object({ type: z.enum(['VIDEO_OPEN', 'LINK_OPEN']), materialId: z.string() })
       .parse(req.body);
-    await logActivity(req.user!.studentId, body.type, body.title, body.meta);
+    await assertCanReadMaterial(req.user!, body.materialId);
+    const material = await prisma.material.findUniqueOrThrow({ where: { id: body.materialId }, select: { title: true } });
+    const title = body.type === 'VIDEO_OPEN' ? `Просмотр видео «${material.title}»` : `Открыта ссылка «${material.title}»`;
+    await logActivity(req.user!.studentId, body.type, title, { materialId: body.materialId });
     res.status(201).json(ok({ success: true }));
   })
 );
@@ -218,6 +221,10 @@ router.post(
         throw new AppError('Группа не относится к курсу', 400, 'GROUP_MISMATCH');
       }
     }
+    const already = await prisma.groupStudent.findFirst({
+      where: { studentId: req.user!.studentId!, status: 'ACTIVE', group: { courseId: body.courseId } },
+    });
+    if (already) throw new AppError('Вы уже учитесь на этом курсе', 409, 'ALREADY_ENROLLED');
     const pending = await prisma.courseApplication.findFirst({
       where: { studentId: req.user!.studentId!, courseId: body.courseId, status: 'PENDING' },
     });
@@ -237,7 +244,8 @@ router.post(
       admins.map((a) => a.id),
       'APPLICATION',
       'Заявка на обучение',
-      `${req.user!.firstName} ${req.user!.lastName} подал заявку на «${course.title}»`
+      `${req.user!.firstName} ${req.user!.lastName} подал заявку на «${course.title}»`,
+      '/admin/groups'
     );
     await logActivity(req.user!.studentId, 'APPLICATION', `Заявка на курс «${course.title}»`);
     res.status(201).json(ok(app));
@@ -305,7 +313,8 @@ router.patch(
         existing.student.userId,
         'APPLICATION',
         body.status === 'APPROVED' ? 'Заявка одобрена' : 'Заявка отклонена',
-        `Курс «${existing.course.title}»`
+        `Курс «${existing.course.title}»`,
+        body.status === 'APPROVED' && existing.groupId ? '/student/courses' : '/student/catalog'
       );
     }
     await audit(req.user!.id, 'UPDATE', 'CourseApplication', existing.id, body);

@@ -1,61 +1,81 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useApiData } from '@/lib/useApiData';
-import { Badge } from '@/components/ui/Badge';
+import type { ActivityItem } from '@/lib/types';
+import { formatDateLong, formatTime } from '@/lib/format';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/States';
-import { formatDateTime } from '@/lib/format';
+import { PageHeader } from '@/components/cabinet/PageHeader';
 
-type Activity = {
-  id: string;
-  action: string;
-  description: string;
-  metadata?: Record<string, any>;
-  createdAt: string;
+const ICONS: Record<string, string> = {
+  LOGIN: '🔑',
+  SUBMISSION: '📤',
+  SUBMISSION_RETURNED: '↩️',
+  GRADE: '⭐',
+  ATTENDANCE: '✅',
+  MATERIAL_VIEW: '📖',
+  MATERIAL_DOWNLOAD: '⬇️',
+  VIDEO_OPEN: '▶️',
+  LINK_OPEN: '🔗',
+  APPLICATION: '🧾',
 };
 
+function dayKey(iso: string) {
+  const d = new Date(iso);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString();
+}
+
+function dayTitle(key: string) {
+  const d = new Date(key);
+  const today = new Date();
+  const t = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  if (d.getTime() === t) return 'Сегодня';
+  if (d.getTime() === t - 86400000) return 'Вчера';
+  return formatDateLong(d);
+}
+
 export default function StudentActivityPage() {
-  const { data, loading, error, reload } = useApiData<{ activities: Activity[] }>('/api/student/activity');
+  const { data, loading, error, reload } = useApiData<ActivityItem[]>('/api/student/activity');
 
-  if (loading) return <LoadingState />;
-  if (error) return <ErrorState message={error} onRetry={reload} />;
-  if (!data?.activities.length) return <EmptyState title="Активности пока нет" />;
-
-  const actionLabels: Record<string, string> = {
-    SUBMISSION: '📝 Отправка задания',
-    GRADE_RECEIVED: '📊 Получена оценка',
-    ATTENDANCE: '📅 Посещение занятия',
-    ENROLLMENT: '🎓 Запись на курс',
-    COURSE_COMPLETED: '🏆 Курс завершен',
-    ACHIEVEMENT: '🌟 Достижение',
-    MATERIAL_VIEWED: '📚 Материал просмотрен',
-    LESSON_PARTICIPATED: '👨‍🏫 Участие в занятии',
-  };
+  const groups = useMemo(() => {
+    const map = new Map<string, ActivityItem[]>();
+    (data ?? []).forEach((a) => {
+      const k = dayKey(a.createdAt);
+      map.set(k, [...(map.get(k) ?? []), a]);
+    });
+    return [...map.entries()];
+  }, [data]);
 
   return (
     <div>
-      <h1 className="page-title">История активности</h1>
-      <p className="page-sub">Ваши действия и достижения</p>
-
-      <div className="stack">
-        {data.activities.map((activity) => (
-          <div className="card" key={activity.id} style={{ padding: '1rem' }}>
-            <div className="row space-between">
-              <strong>{actionLabels[activity.action] || activity.action}</strong>
-              <span className="hint">{formatDateTime(activity.createdAt)}</span>
-            </div>
-            <p style={{ margin: '0.5rem 0' }}>{activity.description}</p>
-            {activity.metadata && (
-              <div style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>
-                {Object.entries(activity.metadata).map(([key, value]) => (
-                  <div key={key}>
-                    {key}: {String(value)}
-                  </div>
+      <PageHeader title="Активность" subtitle="Ваши входы, отправленные работы, оценки, посещения и открытые материалы." />
+      {loading ? (
+        <LoadingState />
+      ) : error ? (
+        <ErrorState message={error} onRetry={reload} />
+      ) : !groups.length ? (
+        <EmptyState icon="🕒" title="Активности пока нет" description="Здесь появятся ваши действия в системе." />
+      ) : (
+        <div className="card">
+          {groups.map(([key, items]) => (
+            <div key={key}>
+              <div className="timeline-day">{dayTitle(key)}</div>
+              <ul className="timeline">
+                {items.map((a) => (
+                  <li key={a.id}>
+                    <div className="row space-between">
+                      <span>
+                        <span aria-hidden>{ICONS[a.type] ?? '•'}</span> {a.title}
+                      </span>
+                      <small className="muted">{formatTime(a.createdAt)}</small>
+                    </div>
+                  </li>
                 ))}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

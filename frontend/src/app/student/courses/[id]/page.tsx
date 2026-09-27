@@ -1,280 +1,299 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { api, ApiRequestError } from '@/lib/api';
+import { useState } from 'react';
 import { useApiData } from '@/lib/useApiData';
+import type { Assignment, LessonCard, Material, PersonRef, ProgressInfo } from '@/lib/types';
+import { formatDate, formatDateTime, fullName, statusLabel } from '@/lib/format';
+import { studentAssignmentState } from '@/lib/assignments';
+import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
-import { Field, Input, Textarea } from '@/components/ui/Field';
-import { ProgressBar } from '@/components/ui/ProgressBar';
-import { ErrorState, LoadingState } from '@/components/ui/States';
-import { formatDateTime, fullName, statusLabel } from '@/lib/format';
+import { ButtonLink } from '@/components/ui/Button';
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/States';
+import { PageHeader } from '@/components/cabinet/PageHeader';
+import { LessonCardView } from '@/components/cabinet/LessonCard';
+import { MaterialCard } from '@/components/cabinet/MaterialCard';
+import { ProgressBreakdown } from '@/components/cabinet/ProgressBreakdown';
 
 type Detail = {
-  course: { title: string; description?: string };
-  group: { code: string };
-  teacher?: { user: { firstName: string; lastName: string } };
-  progress: { progressPercent: number; attendancePercent: number; assignmentsPercent: number };
-  averageGrade: number | null;
-  nextLesson?: { title: string; startsAt: string; format: string; meetingUrl?: string; room?: string } | null;
-  materials: { id: string; title: string; topic?: string; type: string; fileUrl?: string; fileName?: string; videoUrl?: string }[];
-  assignments: {
+  course: { id: string; title: string; shortDesc?: string | null; description?: string | null };
+  group: { id: string; code: string; status: string; format: string; startDate?: string | null; endDate?: string | null };
+  teacher?: { position?: string | null; specialization?: string | null; user: PersonRef } | null;
+  lessons: LessonCard[];
+  materials: Material[];
+  assignments: Assignment[];
+  grades: {
     id: string;
-    title: string;
-    description?: string;
-    deadline?: string;
-    status: string;
-    attachmentUrl?: string;
-    attachmentName?: string;
-    submission?: { 
-      status: string; 
-      grade?: { score: number; maxScore: number };
-      text?: string;
-      fileUrl?: string;
-      fileName?: string;
-    } | null;
+    score: number;
+    maxScore: number;
+    comment?: string | null;
+    updatedAt: string;
+    submission?: { assignment: { id: string; title: string } } | null;
+    lesson?: { title: string } | null;
   }[];
+  attendance: { id: string; status: string; note?: string | null; lesson: { title: string; startsAt: string } }[];
+  attendanceSummary: { total: number; present: number; absent: number; late: number; excused: number; percent: number };
+  announcements: { id: string; title: string; body: string; createdAt: string; author: PersonRef }[];
+  progress: ProgressInfo;
+  nextLesson: LessonCard | null;
+};
+
+type Tab = 'overview' | 'lessons' | 'assignments' | 'materials' | 'grades' | 'attendance' | 'announcements';
+
+const ATT_TONE: Record<string, 'success' | 'warning' | 'info' | 'danger'> = {
+  PRESENT: 'success',
+  LATE: 'warning',
+  EXCUSED: 'info',
+  ABSENT: 'danger',
 };
 
 export default function StudentCourseDetailPage() {
-  const params = useParams<{ id: string }>();
-  const { data, loading, error, reload } = useApiData<Detail>(
-    `/api/analytics/student/course/${params.id}`
-  );
-  const [submissionOpen, setSubmissionOpen] = useState(false);
-  const [selectedAssignment, setSelectedAssignment] = useState<string | null>(null);
-  const [submissionForm, setSubmissionForm] = useState({ text: '', file: null as File | null });
-  const [msg, setMsg] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!selectedAssignment) return;
-    setSubmitting(true);
-    setMsg('');
-    try {
-      let fileUrl = null;
-      let fileName = null;
-
-      if (submissionForm.file) {
-        const formData = new FormData();
-        formData.append('file', submissionForm.file);
-        const uploadResponse = await api<{ fileUrl: string; fileName: string }>('/api/uploads/assignment', {
-          method: 'POST',
-          body: formData,
-        });
-        fileUrl = uploadResponse.fileUrl;
-        fileName = uploadResponse.fileName;
-      }
-
-      await api(`/api/assignments/${selectedAssignment}/submissions`, {
-        method: 'POST',
-        json: {
-          text: submissionForm.text,
-          fileUrl,
-          fileName,
-        },
-      });
-
-      setSubmissionOpen(false);
-      setSubmissionForm({ text: '', file: null });
-      setSelectedAssignment(null);
-      reload();
-      setMsg('Ответ отправлен');
-    } catch (err) {
-      setMsg(err instanceof ApiRequestError ? err.message : 'Ошибка');
-    } finally {
-      setSubmitting(false);
-    }
-  }
+  const { id } = useParams<{ id: string }>();
+  const { data, loading, error, reload } = useApiData<Detail>(`/api/analytics/student/course/${id}`);
+  const [tab, setTab] = useState<Tab>('overview');
 
   if (loading) return <LoadingState />;
-  if (error || !data) return <ErrorState message={error || 'Не найдено'} onRetry={reload} />;
+  if (error || !data) return <ErrorState message={error || 'Курс недоступен'} onRetry={reload} />;
+
+  const p = data.progress;
+  const tabs: { key: Tab; label: string; count?: number }[] = [
+    { key: 'overview', label: 'Обзор' },
+    { key: 'lessons', label: 'Занятия', count: data.lessons.length },
+    { key: 'assignments', label: 'Задания', count: data.assignments.length },
+    { key: 'materials', label: 'Материалы', count: data.materials.length },
+    { key: 'grades', label: 'Оценки', count: data.grades.length },
+    { key: 'attendance', label: 'Посещаемость' },
+    { key: 'announcements', label: 'Объявления', count: data.announcements.length },
+  ];
 
   return (
-    <div>
-      <h1 className="page-title">{data.course.title}</h1>
-      <p className="page-sub">
-        Группа {data.group.code} · {fullName(data.teacher?.user)}
-      </p>
+    <div className="stack" style={{ gap: '1rem' }}>
+      <PageHeader
+        back={{ href: '/student/courses', label: 'Назад к курсам' }}
+        title={data.course.title}
+        subtitle={`Группа ${data.group.code} · ${statusLabel[data.group.format] ?? data.group.format}${
+          data.group.startDate ? ` · ${formatDate(data.group.startDate)} — ${formatDate(data.group.endDate)}` : ''
+        }`}
+        actions={<Badge tone="brand">Прогресс {Math.round(p.progressPercent)}%</Badge>}
+      />
 
-      <div className="grid grid-3" style={{ marginBottom: '1rem' }}>
-        <div className="card">
-          <div className="stat-label">Прогресс</div>
-          <div className="stat-value">{data.progress.progressPercent}%</div>
-          <ProgressBar value={data.progress.progressPercent} />
-        </div>
-        <div className="card">
-          <div className="stat-label">Средний балл</div>
-          <div className="stat-value">{data.averageGrade ?? '—'}</div>
-        </div>
-        <div className="card">
-          <div className="stat-label">Посещаемость</div>
-          <div className="stat-value">{data.progress.attendancePercent}%</div>
-        </div>
+      <div className="tabs" role="tablist">
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.key}
+            className={`tab ${tab === t.key ? 'active' : ''}`}
+            onClick={() => setTab(t.key)}
+          >
+            {t.label}
+            {t.count ? <span className="muted"> ({t.count})</span> : null}
+          </button>
+        ))}
       </div>
 
-      {data.nextLesson && (
-        <div className="card" style={{ marginBottom: '1rem', background: 'linear-gradient(145deg, var(--brand-soft), #fff)' }}>
-          <h3>Ближайшее занятие</h3>
-          <p style={{ marginBottom: '0.5rem' }}>
-            <strong>{data.nextLesson.title}</strong>
-          </p>
-          <p style={{ marginBottom: '0.5rem' }}>
-            {formatDateTime(data.nextLesson.startsAt)}
-          </p>
-          <div className="row" style={{ gap: '0.5rem' }}>
-            <Badge tone={data.nextLesson.format === 'ONLINE' ? 'success' : 'info'}>
-              {data.nextLesson.format === 'ONLINE' ? '🟢 Онлайн' : '🔵 Офлайн'}
-            </Badge>
-            {data.nextLesson.format === 'ONLINE' && data.nextLesson.meetingUrl && (
-              <a href={data.nextLesson.meetingUrl} target="_blank" rel="noopener noreferrer">
-                <Badge tone="brand">Перейти к занятию</Badge>
-              </a>
-            )}
-            {data.nextLesson.format === 'OFFLINE' && data.nextLesson.room && (
-              <Badge>Аудитория: {data.nextLesson.room}</Badge>
-            )}
+      {tab === 'overview' && (
+        <div className="layout-2-1">
+          <div className="stack" style={{ gap: '1rem' }}>
+            <section className="card">
+              <h2 className="card-title">Ближайшее занятие</h2>
+              {data.nextLesson ? <LessonCardView lesson={data.nextLesson} /> : <p className="muted">Запланированных занятий нет.</p>}
+            </section>
+            <section className="card">
+              <h2 className="card-title">О курсе</h2>
+              <p className="pre-wrap">{data.course.description || data.course.shortDesc || 'Описание курса скоро появится.'}</p>
+            </section>
           </div>
-        </div>
-      )}
-
-      <div className="grid grid-2">
-        <div className="card">
-          <h3>Материалы</h3>
-          <div className="stack">
-            {data.materials.map((m) => (
-              <div key={m.id} className="card" style={{ padding: '1rem' }}>
-                <div className="row space-between">
-                  <strong>{m.title}</strong>
-                  <Badge>{m.type}</Badge>
-                </div>
-                {m.topic && <p className="hint">{m.topic}</p>}
-                {m.fileUrl && (
-                  <a 
-                    href={m.fileUrl} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    style={{ fontSize: '0.9rem', color: 'var(--brand)' }}
-                  >
-                    📎 Скачать: {m.fileName || 'Файл'}
-                  </a>
-                )}
-                {m.videoUrl && (
-                  <a 
-                    href={m.videoUrl} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    style={{ fontSize: '0.9rem', color: 'var(--brand)' }}
-                  >
-                    🎥 Смотреть видео
-                  </a>
-                )}
-              </div>
-            ))}
-            {!data.materials.length && <p>Материалов пока нет</p>}
-          </div>
-        </div>
-        <div className="card">
-          <h3>Задания</h3>
-          <div className="stack">
-            {data.assignments.map((a) => {
-              const st = a.submission?.status || a.status;
-              return (
-                <div key={a.id} className="card" style={{ padding: '1rem' }}>
-                  <div className="row space-between">
-                    <strong>{a.title}</strong>
-                    <Badge
-                      tone={
-                        st === 'GRADED'
-                          ? 'success'
-                          : st === 'OVERDUE'
-                            ? 'danger'
-                            : st === 'SUBMITTED'
-                              ? 'info'
-                              : 'warning'
-                      }
-                    >
-                      {statusLabel[st] || st}
-                    </Badge>
-                  </div>
-                  {a.description && <p className="hint">{a.description}</p>}
-                  <p style={{ margin: 0, fontSize: '0.9rem' }}>
-                    до {formatDateTime(a.deadline)}
-                    {a.submission?.grade
-                      ? ` · ${a.submission.grade.score}/${a.submission.grade.maxScore}`
-                      : ''}
-                  </p>
-                  {a.attachmentUrl && (
-                    <a 
-                      href={a.attachmentUrl} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      style={{ fontSize: '0.85rem', color: 'var(--brand)' }}
-                    >
-                      📎 Вложение: {a.attachmentName || 'Файл'}
-                    </a>
-                  )}
-                  {a.submission && (
-                    <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--muted)' }}>
-                      {a.submission.text && <p>Ответ: {a.submission.text}</p>}
-                      {a.submission.fileUrl && (
-                        <a href={a.submission.fileUrl} target="_blank" rel="noopener noreferrer">
-                          📎 Ваш файл: {a.submission.fileName || 'Файл'}
-                        </a>
-                      )}
+          <div className="stack" style={{ gap: '1rem' }}>
+            <section className="card">
+              <h2 className="card-title">Прогресс по курсу</h2>
+              <ProgressBreakdown
+                overall={p.progressPercent}
+                lessons={p.lessonsPercent}
+                assignments={p.assignmentsPercent}
+                attendance={p.attendancePercent}
+                details={{
+                  lessons: `Проведено ${p.lessonsCompleted} из ${p.lessonsTotal}`,
+                  assignments: `Сдано ${p.assignmentsDone} из ${p.assignmentsTotal}`,
+                  attendance: p.attendanceMarked ? `Посещено ${p.attendancePresent} из ${p.attendanceMarked}` : 'Отметок пока нет',
+                }}
+              />
+            </section>
+            {data.teacher && (
+              <section className="card">
+                <h2 className="card-title">Преподаватель</h2>
+                <div className="row">
+                  <Avatar user={data.teacher.user} size={52} />
+                  <div>
+                    <strong>{fullName(data.teacher.user)}</strong>
+                    <div className="muted" style={{ fontSize: '0.85rem' }}>
+                      {data.teacher.position || data.teacher.specialization || 'Преподаватель'}
                     </div>
-                  )}
-                  {st !== 'GRADED' && st !== 'SUBMITTED' && (
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        setSelectedAssignment(a.id);
-                        setSubmissionOpen(true);
-                      }}
-                      style={{ marginTop: '0.5rem' }}
-                    >
-                      Ответить
-                    </Button>
-                  )}
+                  </div>
                 </div>
-              );
-            })}
+              </section>
+            )}
           </div>
         </div>
-      </div>
+      )}
 
-      {submissionOpen && selectedAssignment && (
-        <div className="card" style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 1000, maxWidth: 480, padding: '1.5rem' }}>
-          <h3>Ответ на задание</h3>
-          {msg && <p style={{ marginBottom: '1rem' }}>{msg}</p>}
-          <form onSubmit={handleSubmit}>
-            <Field label="Текст ответа">
-              <Textarea
-                value={submissionForm.text}
-                onChange={(e) => setSubmissionForm({ ...submissionForm, text: e.target.value })}
-                placeholder="Введите ваш ответ..."
-              />
-            </Field>
-            <Field label="Файл (опционально)">
-              <Input
-                type="file"
-                onChange={(e) => setSubmissionForm({ ...submissionForm, file: e.target.files?.[0] || null })}
-              />
-              <div className="hint">PDF, DOC, DOCX, ZIP до 10MB</div>
-            </Field>
-            <div className="row" style={{ gap: '0.5rem' }}>
-              <Button type="submit" disabled={submitting}>
-                {submitting ? 'Отправка...' : 'Отправить'}
-              </Button>
-              <Button variant="secondary" onClick={() => setSubmissionOpen(false)}>
-                Отмена
-              </Button>
+      {tab === 'lessons' && (
+        <section className="card">
+          {data.lessons.length ? (
+            data.lessons.map((l) => <LessonCardView key={l.id} lesson={l} />)
+          ) : (
+            <EmptyState icon="🗓️" title="Занятия ещё не запланированы" />
+          )}
+        </section>
+      )}
+
+      {tab === 'assignments' &&
+        (data.assignments.length ? (
+          <div className="table-wrap">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Задание</th>
+                  <th>Срок</th>
+                  <th>Статус</th>
+                  <th>Оценка</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {data.assignments.map((a) => {
+                  const s = studentAssignmentState(a);
+                  return (
+                    <tr key={a.id}>
+                      <td>
+                        <Link href={`/student/assignments/${a.id}`} className="text-link">
+                          {a.title}
+                        </Link>
+                      </td>
+                      <td>{a.deadline ? formatDateTime(a.deadline) : 'Без срока'}</td>
+                      <td>
+                        <Badge tone={s.tone}>{s.label}</Badge>
+                      </td>
+                      <td>{s.sub?.grade ? `${s.sub.grade.score}/${s.sub.grade.maxScore}` : '—'}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        <ButtonLink href={`/student/assignments/${a.id}`} size="sm" variant={s.key === 'active' ? 'primary' : 'secondary'}>
+                          {s.key === 'active' ? 'Сдать' : 'Открыть'}
+                        </ButtonLink>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState icon="📝" title="Заданий пока нет" />
+        ))}
+
+      {tab === 'materials' &&
+        (data.materials.length ? (
+          <div className="grid grid-2">
+            {data.materials.map((m) => (
+              <MaterialCard key={m.id} material={{ ...m, course: m.course ?? { id: data.course.id, title: data.course.title } }} href={`/student/materials/${m.id}`} track />
+            ))}
+          </div>
+        ) : (
+          <EmptyState icon="📂" title="Материалов пока нет" />
+        ))}
+
+      {tab === 'grades' &&
+        (data.grades.length ? (
+          <div className="table-wrap">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>За что</th>
+                  <th>Оценка</th>
+                  <th>Комментарий</th>
+                  <th>Дата</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.grades.map((g) => (
+                  <tr key={g.id}>
+                    <td>{g.submission?.assignment.title ?? `Занятие: ${g.lesson?.title ?? '—'}`}</td>
+                    <td>
+                      <Badge tone={g.score / g.maxScore >= 0.8 ? 'success' : g.score / g.maxScore >= 0.6 ? 'warning' : 'danger'}>
+                        {g.score}/{g.maxScore}
+                      </Badge>
+                    </td>
+                    <td className="pre-wrap">{g.comment || '—'}</td>
+                    <td>{formatDate(g.updatedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState icon="⭐" title="Оценок пока нет" />
+        ))}
+
+      {tab === 'attendance' && (
+        <div className="stack">
+          <div className="card row" style={{ gap: '1.5rem' }}>
+            <span>
+              Посещаемость: <strong>{Math.round(data.attendanceSummary.percent)}%</strong>
+            </span>
+            <span>Присутствовал: {data.attendanceSummary.present - data.attendanceSummary.late - data.attendanceSummary.excused}</span>
+            <span>Опоздания: {data.attendanceSummary.late}</span>
+            <span>Уважительные: {data.attendanceSummary.excused}</span>
+            <span>Пропуски: {data.attendanceSummary.absent}</span>
+          </div>
+          {data.attendance.length ? (
+            <div className="table-wrap">
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th>Дата</th>
+                    <th>Занятие</th>
+                    <th>Статус</th>
+                    <th>Комментарий</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.attendance.map((a) => (
+                    <tr key={a.id}>
+                      <td>{formatDateTime(a.lesson.startsAt)}</td>
+                      <td>{a.lesson.title}</td>
+                      <td>
+                        <Badge tone={ATT_TONE[a.status] ?? 'default'}>{statusLabel[a.status] ?? a.status}</Badge>
+                      </td>
+                      <td>{a.note || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </form>
+          ) : (
+            <EmptyState icon="✅" title="Отметок пока нет" />
+          )}
         </div>
       )}
+
+      {tab === 'announcements' &&
+        (data.announcements.length ? (
+          <div className="stack">
+            {data.announcements.map((a) => (
+              <article key={a.id} className="card">
+                <div className="row space-between">
+                  <strong>{a.title}</strong>
+                  <small className="muted">{formatDateTime(a.createdAt)}</small>
+                </div>
+                <p className="pre-wrap" style={{ margin: '0.4rem 0' }}>{a.body}</p>
+                <small className="muted">{fullName(a.author)}</small>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <EmptyState icon="📢" title="Объявлений пока нет" />
+        ))}
     </div>
   );
 }

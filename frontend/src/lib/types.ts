@@ -112,4 +112,137 @@ export type Branch = {
 
 export type SiteSettings = Record<string, string>;
 
+/* ---------- Cabinet (LMS) ---------- */
+
+export type TeacherRef = { id: string; position?: string | null; specialization?: string | null; user: PersonRef };
+
+export type LessonCard = {
+  id: string;
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  format: 'ONLINE' | 'OFFLINE' | 'HYBRID' | string;
+  status: string;
+  room?: string | null;
+  meetingUrl?: string | null;
+  comment?: string | null;
+  group: { id: string; code: string; format?: string; course: { id: string; title: string }; teacher?: TeacherRef | null };
+  teacher?: TeacherRef | null;
+  branch?: { id: string; name: string; address: string } | null;
+  classroom?: { id: string; name: string } | null;
+};
+
+export type StoredFileInfo = { id: string; originalName: string; size: number; mimeType: string; createdAt?: string };
+
+export type GradeInfo = {
+  id: string;
+  score: number;
+  maxScore: number;
+  comment?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  teacher?: TeacherRef | null;
+};
+
+export type SubmissionAttempt = {
+  id: string;
+  number: number;
+  text?: string | null;
+  submittedAt: string;
+  files: StoredFileInfo[];
+};
+
+export type Submission = {
+  id: string;
+  assignmentId: string;
+  studentId: string;
+  text?: string | null;
+  fileUrl?: string | null;
+  fileName?: string | null;
+  submittedAt?: string | null;
+  status: string;
+  attemptCount: number;
+  feedback?: string | null;
+  returnedAt?: string | null;
+  grade?: GradeInfo | null;
+  attempts?: SubmissionAttempt[];
+  student?: { id: string; user: PersonRef };
+};
+
+export type Assignment = {
+  id: string;
+  title: string;
+  description?: string | null;
+  criteria?: string | null;
+  deadline?: string | null;
+  publishAt?: string | null;
+  maxScore: number;
+  status: string;
+  allowResubmit: boolean;
+  attachmentUrl?: string | null;
+  attachmentName?: string | null;
+  courseId: string;
+  groupId?: string | null;
+  lessonId?: string | null;
+  createdAt: string;
+  course?: { id: string; title: string };
+  group?: { id: string; code: string; teacher?: TeacherRef | null } | null;
+  lesson?: { id: string; title: string; startsAt: string; endsAt?: string } | null;
+  submissions?: Submission[];
+  submission?: Submission | null;
+  pendingReview?: number;
+  _count?: { submissions: number };
+};
+
+export type Material = {
+  id: string;
+  title: string;
+  description?: string | null;
+  topic?: string | null;
+  type: string;
+  fileUrl?: string | null;
+  fileName?: string | null;
+  linkUrl?: string | null;
+  videoUrl?: string | null;
+  publishedAt: string;
+  courseId?: string | null;
+  groupId?: string | null;
+  lessonId?: string | null;
+  authorId?: string | null;
+  course?: { id: string; title: string } | null;
+  group?: { id: string; code: string } | null;
+  lesson?: { id: string; title: string; startsAt?: string } | null;
+  author?: PersonRef | null;
+  files: StoredFileInfo[];
+};
+
+export type ProgressInfo = {
+  progressPercent: number;
+  lessonsPercent: number;
+  assignmentsPercent: number;
+  attendancePercent: number;
+  lessonsTotal: number;
+  lessonsCompleted: number;
+  assignmentsTotal: number;
+  assignmentsDone: number;
+  attendanceMarked: number;
+  attendancePresent: number;
+  averageGrade: number | null;
+  overdueAssignments: number;
+};
+
+export type NotificationItem = {
+  id: string;
+  type: string;
+  title: string;
+  body?: string | null;
+  link?: string | null;
+  readAt?: string | null;
+  createdAt: string;
+};
+
+export type ActivityItem = { id: string; type: string; title: string; meta?: string | null; createdAt: string };
+
+export type UploadRules = { extensions: string[]; accept: string; maxFileMb: number; maxFiles?: number };
+
 export type PublicStat = { key: string; label: string; value: string };

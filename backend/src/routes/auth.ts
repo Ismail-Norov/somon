@@ -12,6 +12,7 @@ import {
   signToken,
 } from '../middleware/auth';
 import { audit } from '../services/notifications';
+import { logActivity } from '../services/activity';
 
 const router = Router();
 
@@ -62,6 +63,7 @@ router.post(
 
     const token = signToken({ id: user.id, role: user.role });
     setAuthCookie(res, token);
+    if (user.student) await logActivity(user.student.id, 'LOGIN', 'Вход в личный кабинет');
 
     res.json(
       ok({

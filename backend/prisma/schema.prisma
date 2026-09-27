@@ -368,6 +368,9 @@ model Submission {
   submittedAt  DateTime?
   status       SubmissionStatus @default(DRAFT)
   attemptCount Int              @default(0)
+  /// Teacher's note when the work is returned for revision (grade comments live on Grade).
+  feedback     String?
+  returnedAt   DateTime?
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
 

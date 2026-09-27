@@ -3,175 +3,135 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { api, ApiRequestError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { useApiData } from '@/lib/useApiData';
+import { formatDateLong, statusLabel } from '@/lib/format';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Field, Input, Textarea } from '@/components/ui/Field';
+import { Alert } from '@/components/ui/States';
+import { PageHeader } from '@/components/cabinet/PageHeader';
+import { PhotoUploader } from '@/components/cabinet/PhotoUploader';
+
+type Profile = {
+  createdAt: string;
+  teacher: {
+    groups: { id: string; code: string; status: string; course: { title: string }; _count: { groupStudents: number } }[];
+  } | null;
+};
 
 export default function TeacherProfilePage() {
   const { user, refresh } = useAuth();
-  const [form, setForm] = useState({ firstName: '', lastName: '', specialization: '', bio: '' });
-  const [msg, setMsg] = useState('');
+  const { data: profile } = useApiData<Profile>('/api/users/me/profile');
+  const [form, setForm] = useState({ firstName: '', lastName: '', position: '', specialization: '', phone: '', bio: '' });
+  const [msg, setMsg] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
       setForm({
         firstName: user.firstName,
         lastName: user.lastName,
+        position: user.position || '',
         specialization: user.specialization || '',
+        phone: user.phone || '',
         bio: user.bio || '',
       });
-      setPhotoPreview(user.photoUrl || null);
     }
   }, [user]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
-    setMsg('');
+    setMsg(null);
     try {
       await api('/api/users/me/profile', { method: 'PATCH', json: form });
       await refresh();
-      setMsg('Сохранено');
+      setMsg({ tone: 'success', text: 'Изменения сохранены.' });
     } catch (err) {
-      setMsg(err instanceof ApiRequestError ? err.message : 'Ошибка');
+      setMsg({ tone: 'error', text: err instanceof ApiRequestError ? err.message : 'Не удалось сохранить' });
     } finally {
       setSaving(false);
     }
   }
 
-  async function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
-    if (!allowedTypes.includes(file.type)) {
-      setMsg('Разрешены только изображения (JPG, PNG, GIF)');
-      return;
-    }
-
-    if (file.size > 5 * 1024 * 1024) {
-      setMsg('Размер файла не должен превышать 5MB');
-      return;
-    }
-
-    setUploading(true);
-    setMsg('');
-    try {
-      const formData = new FormData();
-      formData.append('photo', file);
-
-      const response = await api<{ photoUrl: string }>('/api/users/me/photo', {
-        method: 'POST',
-        body: formData,
-      });
-
-      setPhotoPreview(response.photoUrl);
-      await refresh();
-      setMsg('Фото успешно загружено');
-    } catch (err) {
-      setMsg(err instanceof ApiRequestError ? err.message : 'Ошибка загрузки фото');
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  async function handlePhotoDelete() {
-    if (!confirm('Удалить фото профиля?')) return;
-
-    try {
-      await api('/api/users/me/photo', { method: 'DELETE' });
-      setPhotoPreview(null);
-      await refresh();
-      setMsg('Фото удалено');
-    } catch (err) {
-      setMsg(err instanceof ApiRequestError ? err.message : 'Ошибка удаления фото');
-    }
-  }
+  if (!user) return null;
 
   return (
-    <div>
-      <h1 className="page-title">Профиль преподавателя</h1>
-      <p className="page-sub">{user?.email}</p>
-      
-      <div className="card" style={{ maxWidth: 480, marginBottom: '1.5rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', marginBottom: '1.5rem' }}>
-          <div
-            style={{
-              width: 100,
-              height: 100,
-              borderRadius: '50%',
-              background: photoPreview 
-                ? `url(${photoPreview}) center/cover` 
-                : 'linear-gradient(145deg, var(--brand), var(--brand-dark))',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#fff',
-              fontSize: '2rem',
-              fontWeight: 700,
-            }}
-          >
-            {!photoPreview && (user?.firstName?.[0] || '') + (user?.lastName?.[0] || '')}
-          </div>
-          <div>
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
-              <input
-                type="file"
-                id="photo-upload"
-                accept="image/jpeg,image/jpg,image/png,image/gif"
-                onChange={handlePhotoUpload}
-                disabled={uploading}
-                style={{ display: 'none' }}
-              />
-              <label htmlFor="photo-upload">
-                <Button as="span" disabled={uploading} size="sm">
-                  {uploading ? 'Загрузка...' : 'Загрузить фото'}
-                </Button>
-              </label>
-              {photoPreview && (
-                <Button variant="secondary" onClick={handlePhotoDelete} size="sm">
-                  Удалить
-                </Button>
-              )}
+    <div className="stack" style={{ gap: '1rem' }}>
+      <PageHeader title="Профиль преподавателя" subtitle="Эти данные видят студенты и посетители сайта на странице преподавателей." />
+      <div className="layout-2-1">
+        <div className="stack" style={{ gap: '1rem' }}>
+          <section className="card">
+            <h2 className="card-title">Фото профиля</h2>
+            <PhotoUploader />
+          </section>
+          <form className="card" onSubmit={onSubmit}>
+            <h2 className="card-title">Данные</h2>
+            {msg && (
+              <Alert tone={msg.tone} onClose={() => setMsg(null)}>
+                {msg.text}
+              </Alert>
+            )}
+            <div className="grid grid-2">
+              <Field label="Имя">
+                <Input value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} required maxLength={60} />
+              </Field>
+              <Field label="Фамилия">
+                <Input value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} required maxLength={60} />
+              </Field>
+              <Field label="Должность">
+                <Input value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} placeholder="Старший преподаватель" />
+              </Field>
+              <Field label="Специализация">
+                <Input value={form.specialization} onChange={(e) => setForm({ ...form, specialization: e.target.value })} />
+              </Field>
+              <Field label="Телефон">
+                <Input type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+              </Field>
+              <Field label="Email" hint="Email меняет администратор">
+                <Input value={user.email} disabled />
+              </Field>
             </div>
-            <p style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>
-              JPG, PNG, GIF до 5MB
-            </p>
-          </div>
+            <Field label="О себе">
+              <Textarea rows={5} value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} maxLength={2000} />
+            </Field>
+            <Button type="submit" disabled={saving}>
+              {saving ? 'Сохраняем...' : 'Сохранить'}
+            </Button>
+          </form>
         </div>
+        <aside className="stack" style={{ gap: '1rem' }}>
+          <section className="card">
+            <h2 className="card-title">Аккаунт</h2>
+            <dl className="kv">
+              <dt>Роль</dt>
+              <dd>{statusLabel[user.role]}</dd>
+              <dt>Дата регистрации</dt>
+              <dd>{formatDateLong(profile?.createdAt ?? user.createdAt)}</dd>
+            </dl>
+          </section>
+          <section className="card">
+            <h2 className="card-title">Мои группы</h2>
+            {!profile?.teacher?.groups.length ? (
+              <p className="muted">Активных групп нет.</p>
+            ) : (
+              <ul className="list-plain">
+                {profile.teacher.groups.map((g) => (
+                  <li key={g.id} className="list-row">
+                    <div>
+                      <strong>{g.code}</strong>
+                      <div className="muted" style={{ fontSize: '0.85rem' }}>
+                        {g.course.title} · {g._count.groupStudents} студ.
+                      </div>
+                    </div>
+                    <Badge tone={g.status === 'ACTIVE' ? 'success' : 'info'}>{statusLabel[g.status] ?? g.status}</Badge>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </aside>
       </div>
-
-      <form className="card" style={{ maxWidth: 480 }} onSubmit={onSubmit}>
-        <Field label="Имя">
-          <Input
-            value={form.firstName}
-            onChange={(e) => setForm({ ...form, firstName: e.target.value })}
-            required
-          />
-        </Field>
-        <Field label="Фамилия">
-          <Input
-            value={form.lastName}
-            onChange={(e) => setForm({ ...form, lastName: e.target.value })}
-            required
-          />
-        </Field>
-        <Field label="Специализация">
-          <Input
-            value={form.specialization}
-            onChange={(e) => setForm({ ...form, specialization: e.target.value })}
-          />
-        </Field>
-        <Field label="О себе">
-          <Textarea value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value }) } />
-        </Field>
-        {msg && <p>{msg}</p>}
-        <Button type="submit" disabled={saving}>
-          {saving ? 'Сохранение...' : 'Сохранить'}
-        </Button>
-      </form>
     </div>
   );
 }

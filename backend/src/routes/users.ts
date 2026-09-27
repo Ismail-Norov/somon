@@ -7,42 +7,17 @@ import { AppError, ok } from '../lib/errors';
 import { asyncHandler } from '../middleware/error';
 import { requireAuth, requireRole } from '../middleware/auth';
 import { audit } from '../services/notifications';
-import multer from 'multer';
-import path from 'path';
-import fs from 'fs/promises';
+import { createUploader, deleteUploadUrl, EXTENSION_SETS, handleUpload } from '../lib/uploads';
+import { publicUserSelect } from '../lib/selects';
 
 const router = Router();
 
-// Configure multer for photo uploads
-const uploadDir = path.resolve(process.env.UPLOAD_DIR || 'uploads', 'photos');
-const storage = multer.diskStorage({
-  destination: async (req, file, cb) => {
-    try {
-      await fs.mkdir(uploadDir, { recursive: true });
-      cb(null, uploadDir);
-    } catch (err) {
-      cb(err as Error, uploadDir);
-    }
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    cb(null, `user-${req.user!.id}-${uniqueSuffix}${ext}`);
-  },
-});
+const PHOTO_MAX_MB = 5;
+const photoUploader = createUploader({ dir: 'photos', extensions: EXTENSION_SETS.image, maxMb: PHOTO_MAX_MB });
 
-const upload = multer({
-  storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
-    if (allowedTypes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new AppError('Разрешены только изображения (JPG, PNG, GIF)', 400, 'INVALID_FILE_TYPE') as unknown as Error);
-    }
-  },
-});
+async function removePhoto(url?: string | null) {
+  if (url?.startsWith('/uploads/photos/')) await deleteUploadUrl(url);
+}
 
 router.use(requireAuth);
 
@@ -77,9 +52,11 @@ router.get(
           email: u.email,
           firstName: u.firstName,
           lastName: u.lastName,
+          photoUrl: u.photoUrl,
           role: u.role,
           status: u.status,
           createdAt: u.createdAt,
+          phone: u.student?.phone ?? u.teacher?.phone ?? null,
           studentId: u.student?.id,
           teacherId: u.teacher?.id,
         }))
@@ -203,23 +180,71 @@ router.patch(
   })
 );
 
+async function loadProfile(userId: string) {
+  const user = await prisma.user.findUniqueOrThrow({
+    where: { id: userId },
+    include: {
+      student: {
+        include: {
+          groupStudents: {
+            where: { status: { in: ['ACTIVE', 'COMPLETED'] } },
+            include: {
+              group: {
+                select: {
+                  id: true,
+                  code: true,
+                  status: true,
+                  format: true,
+                  startDate: true,
+                  endDate: true,
+                  course: { select: { id: true, title: true } },
+                  teacher: { select: { id: true, user: { select: publicUserSelect } } },
+                },
+              },
+            },
+            orderBy: { joinedAt: 'desc' },
+          },
+        },
+      },
+      teacher: {
+        include: {
+          groups: {
+            where: { status: { in: ['PLANNED', 'ENROLLMENT', 'ACTIVE'] } },
+            select: {
+              id: true,
+              code: true,
+              status: true,
+              course: { select: { id: true, title: true } },
+              _count: { select: { groupStudents: { where: { status: 'ACTIVE' } } } },
+            },
+          },
+        },
+      },
+    },
+  });
+  return user;
+}
+
 router.get(
   '/me/profile',
   asyncHandler(async (req, res) => {
-    const user = await prisma.user.findUnique({
-      where: { id: req.user!.id },
-      include: { student: true, teacher: true },
-    });
-    res.json(ok(user));
+    res.json(ok(await loadProfile(req.user!.id)));
   })
 );
 
+const phoneSchema = z
+  .string()
+  .trim()
+  .max(30)
+  .refine((v) => v === '' || /^\+?[\d\s()-]{6,}$/.test(v), 'Некорректный номер телефона');
+
 const profileSchema = z.object({
-  firstName: z.string().min(1).optional(),
-  lastName: z.string().min(1).optional(),
-  phone: z.string().optional(),
-  specialization: z.string().optional(),
-  bio: z.string().optional(),
+  firstName: z.string().trim().min(1, 'Укажите имя').max(60).optional(),
+  lastName: z.string().trim().min(1, 'Укажите фамилию').max(60).optional(),
+  phone: phoneSchema.optional(),
+  specialization: z.string().trim().max(120).optional(),
+  position: z.string().trim().max(120).optional(),
+  bio: z.string().trim().max(2000).optional(),
 });
 
 router.patch(
@@ -233,83 +258,51 @@ router.patch(
     if (req.user!.studentId && body.phone !== undefined) {
       await prisma.student.update({
         where: { id: req.user!.studentId },
-        data: { phone: body.phone },
+        data: { phone: body.phone || null },
       });
     }
     if (req.user!.teacherId) {
       await prisma.teacher.update({
         where: { id: req.user!.teacherId },
-        data: { specialization: body.specialization, bio: body.bio },
+        data: {
+          specialization: body.specialization,
+          position: body.position,
+          bio: body.bio,
+          phone: body.phone === undefined ? undefined : body.phone || null,
+        },
       });
     }
-    const user = await prisma.user.findUnique({
-      where: { id: req.user!.id },
-      include: { student: true, teacher: true },
-    });
-    res.json(ok(user));
+    res.json(ok(await loadProfile(req.user!.id)));
   })
 );
 
 // Upload user photo
 router.post(
   '/me/photo',
-  upload.single('photo'),
+  handleUpload(photoUploader, { single: 'photo' }),
   asyncHandler(async (req, res) => {
-    if (!req.file) {
-      throw new AppError('Файл не загружен', 400, 'NO_FILE');
-    }
+    const file = req.storedFiles?.[0];
+    if (!file) throw new AppError('Выберите изображение', 400, 'NO_FILE');
 
-    const photoUrl = `/uploads/photos/${req.file.filename}`;
-
-    // Delete old photo if exists
-    const currentUser = await prisma.user.findUnique({
+    const current = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { photoUrl: true } });
+    const updated = await prisma.user.update({
       where: { id: req.user!.id },
+      data: { photoUrl: file.url },
       select: { photoUrl: true },
     });
-
-    if (currentUser?.photoUrl) {
-      const oldPath = path.resolve(process.env.UPLOAD_DIR || 'uploads', currentUser.photoUrl.replace('/uploads/', ''));
-      try {
-        await fs.unlink(oldPath);
-      } catch (err) {
-        // Ignore if file doesn't exist
-      }
-    }
-
-    // Update user with new photo URL
-    const updatedUser = await prisma.user.update({
-      where: { id: req.user!.id },
-      data: { photoUrl },
-      select: { photoUrl: true },
-    });
-
-    res.json(ok({ photoUrl: updatedUser.photoUrl }));
+    await removePhoto(current?.photoUrl);
+    res.json(ok({ photoUrl: updated.photoUrl }));
   })
 );
 
-// Delete user photo
 router.delete(
   '/me/photo',
   asyncHandler(async (req, res) => {
-    const currentUser = await prisma.user.findUnique({
-      where: { id: req.user!.id },
-      select: { photoUrl: true },
-    });
-
-    if (currentUser?.photoUrl) {
-      const oldPath = path.resolve(process.env.UPLOAD_DIR || 'uploads', currentUser.photoUrl.replace('/uploads/', ''));
-      try {
-        await fs.unlink(oldPath);
-      } catch (err) {
-        // Ignore if file doesn't exist
-      }
-
-      await prisma.user.update({
-        where: { id: req.user!.id },
-        data: { photoUrl: null },
-      });
+    const current = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { photoUrl: true } });
+    if (current?.photoUrl) {
+      await prisma.user.update({ where: { id: req.user!.id }, data: { photoUrl: null } });
+      await removePhoto(current.photoUrl);
     }
-
     res.json(ok({ success: true }));
   })
 );

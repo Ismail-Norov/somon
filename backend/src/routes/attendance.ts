@@ -7,10 +7,18 @@ import { AppError, ok } from '../lib/errors';
 import { asyncHandler } from '../middleware/error';
 import { requireAuth, requireRole } from '../middleware/auth';
 import { assertTeacherOwnsGroup } from '../services/access';
-import { audit } from '../services/notifications';
+import { audit, getStudentUserId, notifyUser } from '../services/notifications';
+import { ensureAchievements, logActivity } from '../services/activity';
 
 const router = Router();
 router.use(requireAuth);
+
+const ATTENDANCE_TITLES: Record<AttendanceStatus, string> = {
+  PRESENT: 'Посещено занятие',
+  LATE: 'Опоздание на занятие',
+  ABSENT: 'Пропуск занятия',
+  EXCUSED: 'Пропуск по уважительной причине',
+};
 
 router.get(
   '/',
@@ -87,19 +95,43 @@ router.post(
       }
     }
 
-    const results = [];
+    const previous = await prisma.attendance.findMany({ where: { lessonId: body.lessonId } });
+    const prevStatus = new Map(previous.map((p) => [p.studentId, p.status]));
+
+    const results = await prisma.$transaction(
+      body.items.map((item) =>
+        prisma.attendance.upsert({
+          where: { lessonId_studentId: { lessonId: body.lessonId, studentId: item.studentId } },
+          create: {
+            lessonId: body.lessonId,
+            studentId: item.studentId,
+            status: item.status,
+            note: item.note,
+          },
+          update: { status: item.status, note: item.note },
+        })
+      )
+    );
+
+    if (lesson.status === 'SCHEDULED' && lesson.startsAt <= new Date()) {
+      await prisma.lesson.update({ where: { id: lesson.id }, data: { status: 'COMPLETED' } });
+    }
+
     for (const item of body.items) {
-      const row = await prisma.attendance.upsert({
-        where: { lessonId_studentId: { lessonId: body.lessonId, studentId: item.studentId } },
-        create: {
-          lessonId: body.lessonId,
-          studentId: item.studentId,
-          status: item.status,
-          note: item.note,
-        },
-        update: { status: item.status, note: item.note },
-      });
-      results.push(row);
+      if (prevStatus.get(item.studentId) === item.status) continue;
+      await logActivity(
+        item.studentId,
+        'ATTENDANCE',
+        `${ATTENDANCE_TITLES[item.status]}: «${lesson.title}»`,
+        { lessonId: lesson.id, status: item.status }
+      );
+      if (item.status === 'ABSENT') {
+        const userId = await getStudentUserId(item.studentId);
+        if (userId) {
+          await notifyUser(userId, 'ATTENDANCE', 'Отмечен пропуск занятия', `${lesson.title} · ${lesson.group.code}`, '/student/progress');
+        }
+      }
+      await ensureAchievements(item.studentId);
     }
 
     await audit(req.user!.id, 'BULK_ATTENDANCE', 'Lesson', body.lessonId);

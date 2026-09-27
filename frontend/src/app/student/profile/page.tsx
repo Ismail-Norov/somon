@@ -1,172 +1,158 @@
 'use client';
 
+import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import { api, ApiRequestError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { useApiData } from '@/lib/useApiData';
+import type { PersonRef } from '@/lib/types';
+import { formatDate, formatDateLong, fullName, statusLabel } from '@/lib/format';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Field, Input } from '@/components/ui/Field';
+import { Alert, LoadingState } from '@/components/ui/States';
+import { PageHeader } from '@/components/cabinet/PageHeader';
+import { PhotoUploader } from '@/components/cabinet/PhotoUploader';
+
+type Profile = {
+  createdAt: string;
+  student: {
+    phone?: string | null;
+    groupStudents: {
+      id: string;
+      status: string;
+      joinedAt: string;
+      group: {
+        id: string;
+        code: string;
+        status: string;
+        startDate?: string | null;
+        endDate?: string | null;
+        course: { id: string; title: string };
+        teacher?: { user: PersonRef } | null;
+      };
+    }[];
+  } | null;
+};
 
 export default function StudentProfilePage() {
   const { user, refresh } = useAuth();
+  const { data: profile, loading, reload } = useApiData<Profile>('/api/users/me/profile');
   const [form, setForm] = useState({ firstName: '', lastName: '', phone: '' });
-  const [msg, setMsg] = useState('');
+  const [msg, setMsg] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
 
   useEffect(() => {
-    if (user) {
-      setForm({
-        firstName: user.firstName,
-        lastName: user.lastName,
-        phone: user.phone || '',
-      });
-      setPhotoPreview(user.photoUrl || null);
-    }
+    if (user) setForm({ firstName: user.firstName, lastName: user.lastName, phone: user.phone || '' });
   }, [user]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
-    setMsg('');
+    setMsg(null);
     try {
       await api('/api/users/me/profile', { method: 'PATCH', json: form });
-      await refresh();
-      setMsg('Сохранено');
+      await Promise.all([refresh(), reload()]);
+      setMsg({ tone: 'success', text: 'Изменения сохранены.' });
     } catch (err) {
-      setMsg(err instanceof ApiRequestError ? err.message : 'Ошибка');
+      setMsg({ tone: 'error', text: err instanceof ApiRequestError ? err.message : 'Не удалось сохранить' });
     } finally {
       setSaving(false);
     }
   }
 
-  async function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Validate file type
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
-    if (!allowedTypes.includes(file.type)) {
-      setMsg('Разрешены только изображения (JPG, PNG, GIF)');
-      return;
-    }
-
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      setMsg('Размер файла не должен превышать 5MB');
-      return;
-    }
-
-    setUploading(true);
-    setMsg('');
-    try {
-      const formData = new FormData();
-      formData.append('photo', file);
-
-      const response = await api<{ photoUrl: string }>('/api/users/me/photo', {
-        method: 'POST',
-        body: formData,
-      });
-
-      setPhotoPreview(response.photoUrl);
-      await refresh();
-      setMsg('Фото успешно загружено');
-    } catch (err) {
-      setMsg(err instanceof ApiRequestError ? err.message : 'Ошибка загрузки фото');
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  async function handlePhotoDelete() {
-    if (!confirm('Удалить фото профиля?')) return;
-
-    try {
-      await api('/api/users/me/photo', { method: 'DELETE' });
-      setPhotoPreview(null);
-      await refresh();
-      setMsg('Фото удалено');
-    } catch (err) {
-      setMsg(err instanceof ApiRequestError ? err.message : 'Ошибка удаления фото');
-    }
-  }
+  if (!user) return null;
+  const groups = profile?.student?.groupStudents ?? [];
 
   return (
-    <div>
-      <h1 className="page-title">Профиль</h1>
-      <p className="page-sub">{user?.email}</p>
-      
-      <div className="card" style={{ maxWidth: 480, marginBottom: '1.5rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', marginBottom: '1.5rem' }}>
-          <div
-            style={{
-              width: 100,
-              height: 100,
-              borderRadius: '50%',
-              background: photoPreview 
-                ? `url(${photoPreview}) center/cover` 
-                : 'linear-gradient(145deg, var(--brand), var(--brand-dark))',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#fff',
-              fontSize: '2rem',
-              fontWeight: 700,
-            }}
-          >
-            {!photoPreview && (user?.firstName[0] + user?.lastName[0])}
-          </div>
-          <div>
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
-              <input
-                type="file"
-                id="photo-upload"
-                accept="image/jpeg,image/jpg,image/png,image/gif"
-                onChange={handlePhotoUpload}
-                disabled={uploading}
-                style={{ display: 'none' }}
-              />
-              <label htmlFor="photo-upload">
-                <Button as="span" disabled={uploading} size="sm">
-                  {uploading ? 'Загрузка...' : 'Загрузить фото'}
-                </Button>
-              </label>
-              {photoPreview && (
-                <Button variant="secondary" onClick={handlePhotoDelete} size="sm">
-                  Удалить
-                </Button>
-              )}
-            </div>
-            <p style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>
-              JPG, PNG, GIF до 5MB
-            </p>
-          </div>
-        </div>
-      </div>
+    <div className="stack" style={{ gap: '1rem' }}>
+      <PageHeader title="Профиль" subtitle="Личные данные, фото и ваши группы." />
 
-      <form className="card" style={{ maxWidth: 480 }} onSubmit={onSubmit}>
-        <Field label="Имя">
-          <Input
-            value={form.firstName}
-            onChange={(e) => setForm({ ...form, firstName: e.target.value })}
-            required
-          />
-        </Field>
-        <Field label="Фамилия">
-          <Input
-            value={form.lastName}
-            onChange={(e) => setForm({ ...form, lastName: e.target.value })}
-            required
-          />
-        </Field>
-        <Field label="Телефон">
-          <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-        </Field>
-        {msg && <p>{msg}</p>}
-        <Button type="submit" disabled={saving}>
-          {saving ? 'Сохранение...' : 'Сохранить'}
-        </Button>
-      </form>
+      <div className="layout-2-1">
+        <div className="stack" style={{ gap: '1rem' }}>
+          <section className="card">
+            <h2 className="card-title">Фото профиля</h2>
+            <PhotoUploader />
+          </section>
+
+          <form className="card" onSubmit={onSubmit}>
+            <h2 className="card-title">Личные данные</h2>
+            {msg && (
+              <Alert tone={msg.tone} onClose={() => setMsg(null)}>
+                {msg.text}
+              </Alert>
+            )}
+            <div className="grid grid-2">
+              <Field label="Имя">
+                <Input value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} required maxLength={60} />
+              </Field>
+              <Field label="Фамилия">
+                <Input value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} required maxLength={60} />
+              </Field>
+            </div>
+            <div className="grid grid-2">
+              <Field label="Email" hint="Email меняет администратор">
+                <Input value={user.email} disabled />
+              </Field>
+              <Field label="Телефон">
+                <Input
+                  type="tel"
+                  value={form.phone}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  placeholder="+992 90 000 00 00"
+                />
+              </Field>
+            </div>
+            <Button type="submit" disabled={saving}>
+              {saving ? 'Сохраняем...' : 'Сохранить'}
+            </Button>
+          </form>
+        </div>
+
+        <aside className="stack" style={{ gap: '1rem' }}>
+          <section className="card">
+            <h2 className="card-title">Аккаунт</h2>
+            <dl className="kv">
+              <dt>Имя</dt>
+              <dd>{fullName(user)}</dd>
+              <dt>Роль</dt>
+              <dd>{statusLabel[user.role]}</dd>
+              <dt>Дата регистрации</dt>
+              <dd>{formatDateLong(profile?.createdAt ?? user.createdAt)}</dd>
+            </dl>
+          </section>
+          <section className="card">
+            <h2 className="card-title">Мои группы и курсы</h2>
+            {loading ? (
+              <LoadingState />
+            ) : groups.length === 0 ? (
+              <p className="muted">
+                Вы пока не состоите в группах. <Link href="/student/catalog" className="text-link">Выбрать курс</Link>
+              </p>
+            ) : (
+              <ul className="list-plain">
+                {groups.map((gs) => (
+                  <li key={gs.id} className="list-row" style={{ alignItems: 'flex-start' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <Link href={`/student/courses/${gs.group.course.id}`} className="text-link">
+                        {gs.group.course.title}
+                      </Link>
+                      <div className="muted" style={{ fontSize: '0.85rem' }}>
+                        Группа {gs.group.code}
+                        {gs.group.teacher ? ` · ${fullName(gs.group.teacher.user)}` : ''}
+                      </div>
+                      <small className="muted">
+                        {gs.group.startDate ? `${formatDate(gs.group.startDate)} — ${formatDate(gs.group.endDate)}` : `В группе с ${formatDate(gs.joinedAt)}`}
+                      </small>
+                    </div>
+                    <Badge tone={gs.status === 'ACTIVE' ? 'success' : 'default'}>{gs.status === 'ACTIVE' ? 'Учусь' : 'Завершено'}</Badge>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </aside>
+      </div>
     </div>
   );
 }

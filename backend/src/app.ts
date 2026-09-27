@@ -14,6 +14,7 @@ import materialsRoutes from './routes/materials';
 import notificationsRoutes from './routes/notifications';
 import analyticsRoutes from './routes/analytics';
 import uploadsRoutes from './routes/uploads';
+import filesRoutes from './routes/files';
 import studentExtraRoutes from './routes/student-extra';
 import teachersRoutes from './routes/teachers';
 import publicRoutes from './routes/public';
@@ -39,7 +40,25 @@ export function createApp() {
   // Photos and public-site files are intentionally world-readable; everything else needs a session.
   app.use('/uploads/photos', express.static(path.join(uploadDir, 'photos')));
   app.use('/uploads/public', express.static(path.join(uploadDir, 'public')));
-  app.use('/uploads', requireAuth, express.static(uploadDir));
+  // Private files (submissions, assignment instructions, course materials) go through /api/files only.
+  app.use(
+    '/uploads',
+    (req, res, next) => {
+      let first = '';
+      try {
+        first = decodeURIComponent(req.path).replace(/\\/g, '/').split('/').filter(Boolean)[0] ?? '';
+      } catch {
+        return res.status(400).end();
+      }
+      // Windows ignores case and trailing dots/spaces in names, so normalise before comparing.
+      if (first.toLowerCase().replace(/[.\s]+$/, '') === 'private') {
+        return res.status(404).json({ error: { message: 'Файл не найден', code: 'FILE_NOT_FOUND' } });
+      }
+      next();
+    },
+    requireAuth,
+    express.static(uploadDir, { dotfiles: 'deny', index: false })
+  );
 
   app.get('/api/health', (_req, res) => res.json(ok({ status: 'ok', name: 'Somon API' })));
 
@@ -55,6 +74,7 @@ export function createApp() {
   app.use('/api/notifications', notificationsRoutes);
   app.use('/api/analytics', analyticsRoutes);
   app.use('/api/uploads', uploadsRoutes);
+  app.use('/api/files', filesRoutes);
   app.use('/api/student', studentExtraRoutes);
   app.use('/api/teachers', teachersRoutes);
   app.use('/api/public', publicRoutes);
