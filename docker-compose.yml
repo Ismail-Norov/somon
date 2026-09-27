@@ -1,0 +1,19 @@
+# Optional: use PostgreSQL instead of SQLite.
+# 1. Set DATABASE_URL in backend/.env to the connection string below
+# 2. Change prisma provider to "postgresql"
+# 3. docker compose up -d
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: somon
+      POSTGRES_PASSWORD: somon
+      POSTGRES_DB: somon
+    ports:
+      - "5432:5432"
+    volumes:
+      - somon_pg:/var/lib/postgresql/data
+
+volumes:
+  somon_pg:
