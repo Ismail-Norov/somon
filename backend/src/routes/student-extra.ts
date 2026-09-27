@@ -159,7 +159,11 @@ router.post(
   requireRole(Role.TEACHER, Role.ADMIN),
   asyncHandler(async (req, res) => {
     const body = z
-      .object({ groupId: z.string(), title: z.string().min(1), body: z.string().min(1) })
+      .object({
+        groupId: z.string(),
+        title: z.string().trim().min(1, 'Укажите заголовок').max(200),
+        body: z.string().trim().min(1, 'Напишите текст объявления').max(5000),
+      })
       .parse(req.body);
 
     if (req.user!.role === Role.TEACHER) {
@@ -178,7 +182,14 @@ router.post(
     });
 
     const userIds = await getGroupStudentUserIds(body.groupId);
-    await notifyUsers(userIds, 'ANNOUNCEMENT', body.title, body.body);
+    const group = await prisma.group.findUniqueOrThrow({ where: { id: body.groupId }, select: { courseId: true, code: true } });
+    await notifyUsers(
+      userIds,
+      'ANNOUNCEMENT',
+      `Объявление: ${body.title}`,
+      `${group.code} · ${body.body.slice(0, 140)}`,
+      `/student/courses/${group.courseId}`
+    );
     await audit(req.user!.id, 'CREATE', 'Announcement', item.id);
     res.status(201).json(ok(item));
   })

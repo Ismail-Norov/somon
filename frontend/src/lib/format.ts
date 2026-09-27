@@ -32,6 +32,19 @@ export function formatTimeRange(start?: string | Date | null, end?: string | Dat
   return `${formatTime(start)}–${formatTime(end)}`;
 }
 
+/** ISO string → value for <input type="datetime-local"> in the user's timezone. */
+export function toDateTimeInput(value?: string | Date | null) {
+  if (!value) return '';
+  const d = new Date(value);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** <input type="datetime-local"> value → ISO string (or null when empty). */
+export function fromDateTimeInput(value: string) {
+  return value ? new Date(value).toISOString() : null;
+}
+
 export function fullName(u?: { firstName?: string; lastName?: string } | null) {
   if (!u) return '—';
   return `${u.firstName || ''} ${u.lastName || ''}`.trim() || '—';

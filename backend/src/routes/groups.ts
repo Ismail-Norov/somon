@@ -7,6 +7,7 @@ import { AppError, ok } from '../lib/errors';
 import { asyncHandler } from '../middleware/error';
 import { requireAuth, requireRole } from '../middleware/auth';
 import { assertTeacherOwnsGroup } from '../services/access';
+import { groupProgress, groupSummary } from '../services/progress';
 import { audit, getGroupStudentUserIds, notifyUser, notifyUsers } from '../services/notifications';
 
 const router = Router();
@@ -38,14 +39,23 @@ router.get(
 
     if (req.user!.role === Role.TEACHER) {
       const groups = await prisma.group.findMany({
-        where: { teacherId: req.user!.teacherId },
+        where: { teacherId: req.user!.teacherId, status: status || undefined },
         include: {
           course: true,
           _count: { select: { groupStudents: { where: { status: 'ACTIVE' } } } },
+          lessons: {
+            where: { status: 'SCHEDULED', endsAt: { gte: new Date() } },
+            orderBy: { startsAt: 'asc' },
+            take: 1,
+            select: { id: true, title: true, startsAt: true, endsAt: true, format: true },
+          },
         },
         orderBy: { code: 'asc' },
       });
-      return res.json(ok(groups));
+      const withSummary = await Promise.all(
+        groups.map(async ({ lessons, ...g }) => ({ ...g, nextLesson: lessons[0] ?? null, summary: await groupSummary(g.id) }))
+      );
+      return res.json(ok(withSummary));
     }
 
     const links = await prisma.groupStudent.findMany({
@@ -90,6 +100,67 @@ router.get(
     }
 
     res.json(ok(group));
+  })
+);
+
+/** Student card inside a group — for the group's teacher and admins. */
+router.get(
+  '/:id/students/:studentId',
+  requireRole(Role.TEACHER, Role.ADMIN),
+  asyncHandler(async (req, res) => {
+    const { id: groupId, studentId } = req.params;
+    const group =
+      req.user!.role === Role.TEACHER
+        ? await assertTeacherOwnsGroup(req.user!.teacherId, groupId)
+        : await prisma.group.findUnique({ where: { id: groupId } });
+    if (!group) throw new AppError('Группа не найдена', 404, 'NOT_FOUND');
+
+    const link = await prisma.groupStudent.findUnique({
+      where: { groupId_studentId: { groupId, studentId } },
+      include: { student: { include: { user: { select: { ...publicUserSelect, createdAt: true } } } } },
+    });
+    if (!link) throw new AppError('Студент не состоит в этой группе', 404, 'NOT_FOUND');
+
+    const [progress, attendance, assignments, lessonGrades, activities] = await Promise.all([
+      groupProgress(groupId, [studentId]),
+      prisma.attendance.findMany({
+        where: { studentId, lesson: { groupId } },
+        include: { lesson: { select: { id: true, title: true, startsAt: true } } },
+        orderBy: { lesson: { startsAt: 'desc' } },
+      }),
+      prisma.assignment.findMany({
+        where: { groupId, status: { not: 'DRAFT' } },
+        select: {
+          id: true,
+          title: true,
+          deadline: true,
+          maxScore: true,
+          submissions: {
+            where: { studentId },
+            select: { id: true, status: true, submittedAt: true, attemptCount: true, grade: { select: { score: true, maxScore: true, comment: true } } },
+          },
+        },
+        orderBy: [{ deadline: 'asc' }, { createdAt: 'asc' }],
+      }),
+      prisma.grade.findMany({
+        where: { studentId, lesson: { groupId } },
+        include: { lesson: { select: { title: true, startsAt: true } } },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.studentActivity.findMany({ where: { studentId }, orderBy: { createdAt: 'desc' }, take: 15 }),
+    ]);
+
+    res.json(
+      ok({
+        group: { id: group.id, code: group.code, courseId: group.courseId },
+        student: { ...link.student, joinedAt: link.joinedAt, status: link.status },
+        progress: progress.get(studentId) ?? null,
+        attendance,
+        assignments: assignments.map(({ submissions, ...a }) => ({ ...a, submission: submissions[0] ?? null })),
+        lessonGrades,
+        activities,
+      })
+    );
   })
 );
 

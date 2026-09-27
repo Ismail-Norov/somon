@@ -49,19 +49,23 @@ const NAV: Record<Role, NavSection[]> = {
         { href: '/teacher/dashboard', label: 'Главная', icon: '🏠' },
         { href: '/teacher/groups', label: 'Мои группы', icon: '👥' },
         { href: '/teacher/schedule', label: 'Расписание', icon: '🗓️' },
+        { href: '/teacher/attendance', label: 'Посещаемость', icon: '✅' },
       ],
     },
     {
       title: 'Обучение',
       items: [
+        { href: '/teacher/review', label: 'Работы на проверке', icon: '📥', badge: 'review' },
         { href: '/teacher/assignments', label: 'Задания', icon: '📝' },
+        { href: '/teacher/grades', label: 'Оценки', icon: '⭐' },
         { href: '/teacher/materials', label: 'Материалы', icon: '📂' },
-        { href: '/teacher/analytics', label: 'Аналитика', icon: '📊' },
       ],
     },
     {
       title: 'Ещё',
       items: [
+        { href: '/teacher/announcements', label: 'Объявления', icon: '📢' },
+        { href: '/teacher/analytics', label: 'Аналитика', icon: '📊' },
         { href: '/teacher/notifications', label: 'Уведомления', icon: '🔔', badge: 'notifications' },
         { href: '/teacher/profile', label: 'Профиль', icon: '👤' },
       ],

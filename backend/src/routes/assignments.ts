@@ -82,7 +82,7 @@ router.get(
           group: true,
           lesson: { select: { id: true, title: true, startsAt: true } },
           _count: { select: { submissions: true } },
-          submissions: { where: { status: 'SUBMITTED' }, select: { id: true } },
+          submissions: { where: { status: { in: ['SUBMITTED', 'REVIEWING'] } }, select: { id: true } },
         },
         orderBy: { deadline: 'asc' },
       });
@@ -232,12 +232,21 @@ router.get(
       if (!assignment.groupId) throw new AppError('Нет доступа к заданию', 403, 'FORBIDDEN');
       await assertTeacherOwnsGroup(req.user!.teacherId, assignment.groupId);
     }
-    const submissions = await prisma.submission.findMany({
-      where: { assignmentId: assignment.id },
-      include: submissionDetailInclude,
-      orderBy: { submittedAt: 'desc' },
-    });
-    res.json(ok({ ...assignment, submissions }));
+    const [submissions, members] = await Promise.all([
+      prisma.submission.findMany({
+        where: { assignmentId: assignment.id },
+        include: submissionDetailInclude,
+        orderBy: { submittedAt: 'desc' },
+      }),
+      assignment.groupId
+        ? prisma.groupStudent.findMany({
+            where: { groupId: assignment.groupId, status: 'ACTIVE' },
+            include: { student: { include: { user: { select: publicUserSelect } } } },
+            orderBy: { student: { user: { lastName: 'asc' } } },
+          })
+        : Promise.resolve([]),
+    ]);
+    res.json(ok({ ...assignment, submissions, students: members.map((m) => m.student) }));
   })
 );
 

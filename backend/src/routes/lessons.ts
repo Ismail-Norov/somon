@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { LearningFormat, LessonStatus, Role } from '@prisma/client';
 import { prisma } from '../lib/prisma';
-import { publicUserSelect } from '../lib/selects';
+import { lessonCardInclude, publicUserSelect } from '../lib/selects';
 import { AppError, ok } from '../lib/errors';
 import { asyncHandler } from '../middleware/error';
 import { requireAuth, requireRole } from '../middleware/auth';
@@ -36,12 +36,8 @@ router.get(
         startsAt: from || to ? { gte: from, lte: to } : undefined,
       },
       include: {
-        group: {
-          include: {
-            course: true,
-            teacher: { include: { user: { select: publicUserSelect } } },
-          },
-        },
+        ...lessonCardInclude,
+        _count: { select: { attendance: true } },
       },
       orderBy: { startsAt: 'asc' },
     });
