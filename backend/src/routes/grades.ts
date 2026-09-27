@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { Role, SubmissionStatus } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { publicUserSelect } from '../lib/selects';
 import { AppError, ok } from '../lib/errors';
 import { asyncHandler } from '../middleware/error';
 import { requireAuth, requireRole } from '../middleware/auth';
@@ -18,7 +19,7 @@ router.get(
       const grades = await prisma.grade.findMany({
         where: { studentId: req.user!.studentId },
         include: {
-          teacher: { include: { user: true } },
+          teacher: { include: { user: { select: publicUserSelect } } },
           submission: { include: { assignment: { include: { course: true, group: true } } } },
         },
         orderBy: { createdAt: 'desc' },
@@ -42,8 +43,8 @@ router.get(
             ? { submission: { assignment: { groupId } } }
             : undefined,
       include: {
-        student: { include: { user: true } },
-        teacher: { include: { user: true } },
+        student: { include: { user: { select: publicUserSelect } } },
+        teacher: { include: { user: { select: publicUserSelect } } },
         submission: { include: { assignment: true } },
       },
       orderBy: { createdAt: 'desc' },

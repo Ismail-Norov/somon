@@ -48,6 +48,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refresh();
   }, [refresh]);
 
+  // Re-validate the session when the browser restores a page from the back/forward cache,
+  // so a logged-out user cannot see a private page by pressing "Back".
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) refresh();
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, [refresh]);
+
   const login = useCallback(async (email: string, password: string) => {
     const data = await api<{ user: User }>('/api/auth/login', {
       method: 'POST',
@@ -76,8 +86,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
-    await api('/api/auth/logout', { method: 'POST' });
-    setUser(null);
+    try {
+      await api('/api/auth/logout', { method: 'POST' });
+    } finally {
+      setUser(null);
+    }
   }, []);
 
   const value = useMemo(

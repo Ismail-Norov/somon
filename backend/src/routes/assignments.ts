@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { AssignmentStatus, Role, SubmissionStatus } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { publicUserSelect } from '../lib/selects';
 import { AppError, ok } from '../lib/errors';
 import { asyncHandler } from '../middleware/error';
 import { requireAuth, requireRole } from '../middleware/auth';
@@ -81,7 +82,7 @@ router.get(
         lesson: true,
         submissions: {
           include: {
-            student: { include: { user: true } },
+            student: { include: { user: { select: publicUserSelect } } },
             grade: true,
           },
         },

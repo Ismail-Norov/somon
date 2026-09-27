@@ -2,10 +2,11 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { LearningFormat, LessonStatus, Role } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { publicUserSelect } from '../lib/selects';
 import { AppError, ok } from '../lib/errors';
 import { asyncHandler } from '../middleware/error';
 import { requireAuth, requireRole } from '../middleware/auth';
-import { assertTeacherOwnsGroup, checkScheduleConflict } from '../services/access';
+import { assertStudentInGroup, assertTeacherOwnsGroup, checkScheduleConflict } from '../services/access';
 import { audit, getGroupStudentUserIds, notifyUsers } from '../services/notifications';
 
 const router = Router();
@@ -38,7 +39,7 @@ router.get(
         group: {
           include: {
             course: true,
-            teacher: { include: { user: true } },
+            teacher: { include: { user: { select: publicUserSelect } } },
           },
         },
       },
@@ -57,10 +58,10 @@ router.get(
         group: {
           include: {
             course: true,
-            teacher: { include: { user: true } },
+            teacher: { include: { user: { select: publicUserSelect } } },
             groupStudents: {
               where: { status: 'ACTIVE' },
-              include: { student: { include: { user: true } } },
+              include: { student: { include: { user: { select: publicUserSelect } } } },
             },
           },
         },
@@ -69,6 +70,19 @@ router.get(
       },
     });
     if (!lesson) throw new AppError('Занятие не найдено', 404, 'NOT_FOUND');
+    if (req.user!.role === Role.TEACHER) {
+      await assertTeacherOwnsGroup(req.user!.teacherId, lesson.groupId);
+    }
+    if (req.user!.role === Role.STUDENT) {
+      await assertStudentInGroup(req.user!.studentId, lesson.groupId);
+      return res.json(
+        ok({
+          ...lesson,
+          group: { ...lesson.group, groupStudents: [] },
+          attendance: lesson.attendance.filter((a) => a.studentId === req.user!.studentId),
+        })
+      );
+    }
     res.json(ok(lesson));
   })
 );
@@ -140,6 +154,9 @@ router.patch(
 
     if (req.user!.role === Role.TEACHER) {
       await assertTeacherOwnsGroup(req.user!.teacherId, existing.groupId);
+      if (body.groupId && body.groupId !== existing.groupId) {
+        await assertTeacherOwnsGroup(req.user!.teacherId, body.groupId);
+      }
     }
 
     const startsAt = body.startsAt ? new Date(body.startsAt) : existing.startsAt;

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { AttendanceStatus, Role } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { publicUserSelect } from '../lib/selects';
 import { AppError, ok } from '../lib/errors';
 import { asyncHandler } from '../middleware/error';
 import { requireAuth, requireRole } from '../middleware/auth';
@@ -31,14 +32,21 @@ router.get(
       await assertTeacherOwnsGroup(req.user!.teacherId, groupId);
     }
 
+    const lessonFilter =
+      req.user!.role === Role.TEACHER
+        ? { groupId: groupId || undefined, group: { teacherId: req.user!.teacherId } }
+        : groupId
+          ? { groupId }
+          : undefined;
+
     const rows = await prisma.attendance.findMany({
       where: {
         lessonId,
         studentId,
-        lesson: groupId ? { groupId } : undefined,
+        lesson: lessonFilter,
       },
       include: {
-        student: { include: { user: true } },
+        student: { include: { user: { select: publicUserSelect } } },
         lesson: true,
       },
     });

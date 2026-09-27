@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { CourseLevel, CourseStatus, LearningFormat, Role } from '@prisma/client';
+import { CourseLevel, CourseStatus, GroupStatus, LearningFormat, Prisma, Role } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { publicUserSelect, siteUserSelect } from '../lib/selects';
 import { AppError, ok } from '../lib/errors';
 import { asyncHandler } from '../middleware/error';
 import { requireAuth, requireRole } from '../middleware/auth';
@@ -9,30 +10,86 @@ import { audit } from '../services/notifications';
 
 const router = Router();
 
+export const publicCourseInclude = {
+  category: true,
+  groups: {
+    where: { status: { in: ['ENROLLMENT', 'ACTIVE', 'PLANNED'] as GroupStatus[] } },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      status: true,
+      capacity: true,
+      format: true,
+      startDate: true,
+      endDate: true,
+      teacher: {
+        select: { id: true, specialization: true, position: true, user: { select: siteUserSelect } },
+      },
+      _count: { select: { groupStudents: { where: { status: 'ACTIVE' as const } } } },
+    },
+    orderBy: { startDate: 'asc' as const },
+  },
+} satisfies Prisma.CourseInclude;
+
+type PublicCourseRow = Prisma.CourseGetPayload<{ include: typeof publicCourseInclude }>;
+
+export function serializePublicCourse(course: PublicCourseRow) {
+  const teachers = new Map<string, NonNullable<PublicCourseRow['groups'][number]['teacher']>>();
+  for (const g of course.groups) {
+    if (g.teacher) teachers.set(g.teacher.id, g.teacher);
+  }
+  return {
+    ...course,
+    teachers: [...teachers.values()],
+    groups: course.groups.map((g) => ({
+      ...g,
+      seatsLeft: Math.max(0, g.capacity - g._count.groupStudents),
+    })),
+  };
+}
+
+const DURATION_RANGES: Record<string, { gte?: number; lte?: number }> = {
+  short: { lte: 4 },
+  medium: { gte: 5, lte: 8 },
+  long: { gte: 9 },
+};
+
 router.get(
   '/public',
   asyncHandler(async (req, res) => {
     const q = String(req.query.q || '').trim();
+    const categoryId = (req.query.categoryId as string | undefined) || undefined;
+    const level = req.query.level as string | undefined;
+    const format = req.query.format as string | undefined;
+    const duration = DURATION_RANGES[String(req.query.duration || '')];
+
     const courses = await prisma.course.findMany({
       where: {
         status: CourseStatus.PUBLISHED,
+        categoryId,
+        level: level && level in CourseLevel ? (level as CourseLevel) : undefined,
+        format: format && format in LearningFormat ? (format as LearningFormat) : undefined,
+        durationWeeks: duration,
         OR: q
-          ? [{ title: { contains: q } }, { shortDesc: { contains: q } }]
+          ? [{ title: { contains: q } }, { shortDesc: { contains: q } }, { description: { contains: q } }]
           : undefined,
       },
-      include: {
-        category: true,
-        groups: {
-          where: { status: { in: ['ENROLLMENT', 'ACTIVE', 'PLANNED'] } },
-          include: {
-            teacher: { include: { user: true } },
-            _count: { select: { groupStudents: true } },
-          },
-        },
-      },
+      include: publicCourseInclude,
       orderBy: { title: 'asc' },
     });
-    res.json(ok(courses));
+    res.json(ok(courses.map(serializePublicCourse)));
+  })
+);
+
+router.get(
+  '/public/meta',
+  asyncHandler(async (_req, res) => {
+    const categories = await prisma.category.findMany({
+      where: { courses: { some: { status: CourseStatus.PUBLISHED } } },
+      orderBy: { name: 'asc' },
+    });
+    res.json(ok({ categories }));
   })
 );
 
@@ -41,19 +98,10 @@ router.get(
   asyncHandler(async (req, res) => {
     const course = await prisma.course.findFirst({
       where: { id: req.params.id, status: CourseStatus.PUBLISHED },
-      include: {
-        category: true,
-        groups: {
-          where: { status: { in: ['ENROLLMENT', 'ACTIVE', 'PLANNED'] } },
-          include: {
-            teacher: { include: { user: true } },
-            _count: { select: { groupStudents: true } },
-          },
-        },
-      },
+      include: publicCourseInclude,
     });
     if (!course) throw new AppError('Курс не найден', 404, 'NOT_FOUND');
-    res.json(ok(course));
+    res.json(ok(serializePublicCourse(course)));
   })
 );
 
@@ -108,7 +156,7 @@ router.get(
         group: {
           include: {
             course: { include: { category: true } },
-            teacher: { include: { user: true } },
+            teacher: { include: { user: { select: publicUserSelect } } },
           },
         },
       },
@@ -138,8 +186,8 @@ router.get(
         category: true,
         groups: {
           include: {
-            teacher: { include: { user: true } },
-            _count: { select: { groupStudents: true } },
+            teacher: { include: { user: { select: publicUserSelect } } },
+            _count: { select: { groupStudents: { where: { status: 'ACTIVE' } } } },
           },
         },
         materials: { orderBy: { sortOrder: 'asc' } },
@@ -147,11 +195,23 @@ router.get(
       },
     });
     if (!course) throw new AppError('Курс не найден', 404, 'NOT_FOUND');
+
+    if (req.user!.role === Role.TEACHER) {
+      const own = course.groups.some((g) => g.teacherId === req.user!.teacherId);
+      if (!own) throw new AppError('Нет доступа к курсу', 403, 'FORBIDDEN');
+    }
+    if (req.user!.role === Role.STUDENT) {
+      const link = await prisma.groupStudent.findFirst({
+        where: { studentId: req.user!.studentId, status: 'ACTIVE', group: { courseId: course.id } },
+      });
+      if (!link) throw new AppError('Нет доступа к курсу', 403, 'FORBIDDEN');
+    }
     res.json(ok(course));
   })
 );
 
 const courseSchema = z.object({
+  price: z.number().nonnegative().optional().nullable(),
   title: z.string().min(1).max(200),
   shortDesc: z.string().optional(),
   description: z.string().optional(),

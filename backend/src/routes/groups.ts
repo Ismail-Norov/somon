@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { GroupStatus, LearningFormat, Role } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { publicUserSelect } from '../lib/selects';
 import { AppError, ok } from '../lib/errors';
 import { asyncHandler } from '../middleware/error';
 import { requireAuth, requireRole } from '../middleware/auth';
@@ -27,8 +28,8 @@ router.get(
         },
         include: {
           course: true,
-          teacher: { include: { user: true } },
-          _count: { select: { groupStudents: true } },
+          teacher: { include: { user: { select: publicUserSelect } } },
+          _count: { select: { groupStudents: { where: { status: 'ACTIVE' } } } },
         },
         orderBy: { updatedAt: 'desc' },
       });
@@ -40,7 +41,7 @@ router.get(
         where: { teacherId: req.user!.teacherId },
         include: {
           course: true,
-          _count: { select: { groupStudents: true } },
+          _count: { select: { groupStudents: { where: { status: 'ACTIVE' } } } },
         },
         orderBy: { code: 'asc' },
       });
@@ -53,7 +54,7 @@ router.get(
         group: {
           include: {
             course: true,
-            teacher: { include: { user: true } },
+            teacher: { include: { user: { select: publicUserSelect } } },
           },
         },
       },
@@ -69,10 +70,10 @@ router.get(
       where: { id: req.params.id },
       include: {
         course: { include: { category: true } },
-        teacher: { include: { user: true } },
+        teacher: { include: { user: { select: publicUserSelect } } },
         groupStudents: {
           where: { status: 'ACTIVE' },
-          include: { student: { include: { user: true } } },
+          include: { student: { include: { user: { select: publicUserSelect } } } },
         },
         lessons: { orderBy: { startsAt: 'asc' } },
         assignments: { orderBy: { deadline: 'asc' } },
@@ -167,7 +168,7 @@ router.post(
     const studentId = z.object({ studentId: z.string() }).parse(req.body).studentId;
     const group = await prisma.group.findUnique({
       where: { id: req.params.id },
-      include: { _count: { select: { groupStudents: true } } },
+      include: { _count: { select: { groupStudents: { where: { status: 'ACTIVE' } } } } },
     });
     if (!group) throw new AppError('Группа не найдена', 404, 'NOT_FOUND');
     if (group.status === 'ARCHIVED' || group.status === 'COMPLETED') {
@@ -203,7 +204,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const group = await prisma.group.findUnique({
       where: { id: req.params.id },
-      include: { course: true, _count: { select: { groupStudents: true } } },
+      include: { course: true, _count: { select: { groupStudents: { where: { status: 'ACTIVE' } } } } },
     });
     if (!group) throw new AppError('Группа не найдена', 404, 'NOT_FOUND');
     if (!['ENROLLMENT', 'ACTIVE', 'PLANNED'].includes(group.status)) {

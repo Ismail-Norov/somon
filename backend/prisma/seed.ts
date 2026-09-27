@@ -6,6 +6,11 @@ const DEMO_PASSWORD = 'Somon123!';
 
 async function main() {
   console.log('Seeding Somon database...');
+  await prisma.submissionFile.deleteMany();
+  await prisma.submissionAttempt.deleteMany();
+  await prisma.materialFile.deleteMany();
+  await prisma.news.deleteMany();
+  await prisma.siteSetting.deleteMany();
   await prisma.studentAchievement.deleteMany();
   await prisma.achievement.deleteMany();
   await prisma.studentActivity.deleteMany();
@@ -20,6 +25,8 @@ async function main() {
   await prisma.assignment.deleteMany();
   await prisma.material.deleteMany();
   await prisma.lesson.deleteMany();
+  await prisma.classroom.deleteMany();
+  await prisma.branch.deleteMany();
   await prisma.groupStudent.deleteMany();
   await prisma.enrollment.deleteMany();
   await prisma.group.deleteMany();
@@ -44,11 +51,11 @@ async function main() {
 
   const teacherUsers = await Promise.all(
     [
-      { email: 'teacher1@somon.local', firstName: 'Игорь', lastName: 'Петров', specialization: 'Веб-разработка' },
-      { email: 'teacher2@somon.local', firstName: 'Мария', lastName: 'Козлова', specialization: 'Дизайн' },
-      { email: 'teacher3@somon.local', firstName: 'Дмитрий', lastName: 'Смирнов', specialization: 'Аналитика данных' },
-      { email: 'teacher4@somon.local', firstName: 'Елена', lastName: 'Новикова', specialization: 'Маркетинг' },
-    ].map((t) =>
+      { email: 'teacher1@somon.local', firstName: 'Алишер', lastName: 'Каримов', specialization: 'Веб-разработка', position: 'Senior Frontend-разработчик', bio: '8 лет в коммерческой разработке. Ведёт курсы по HTML, CSS, JavaScript и React, помогает студентам собрать первое портфолио.' },
+      { email: 'teacher2@somon.local', firstName: 'Мадина', lastName: 'Рахимова', specialization: 'UI/UX Design', position: 'Product Designer', bio: 'Проектирует интерфейсы для мобильных и веб-продуктов. Учит думать о пользователе и работать в Figma.' },
+      { email: 'teacher3@somon.local', firstName: 'Фаррух', lastName: 'Назаров', specialization: 'Python и аналитика данных', position: 'Data Analyst', bio: 'Строит отчёты и дашборды для бизнеса. Объясняет Python, pandas и визуализацию на реальных задачах.' },
+      { email: 'teacher4@somon.local', firstName: 'Елена', lastName: 'Новикова', specialization: 'Digital-маркетинг', position: 'Head of Marketing', bio: 'Запускала рекламные кампании для локальных и международных брендов. Учит работать с метриками.' },
+    ].map((t, i) =>
       prisma.user.create({
         data: {
           email: t.email,
@@ -56,7 +63,14 @@ async function main() {
           firstName: t.firstName,
           lastName: t.lastName,
           role: Role.TEACHER,
-          teacher: { create: { specialization: t.specialization, bio: `Преподаватель направления «${t.specialization}»` } },
+          teacher: {
+            create: {
+              specialization: t.specialization,
+              position: t.position,
+              bio: t.bio,
+              phone: `+992 90 000 00 0${i + 1}`,
+            },
+          },
         },
         include: { teacher: true },
       })
@@ -81,7 +95,7 @@ async function main() {
           role: Role.STUDENT,
           student: {
             create: {
-              phone: `+7900${String(1000000 + i).slice(0, 7)}`,
+              phone: `+992 93 ${String(100 + i).padStart(3, '0')} 00 ${String(10 + i).slice(-2)}`,
             },
           },
         },
@@ -97,12 +111,14 @@ async function main() {
   );
 
   const courseDefs = [
-    { title: 'Основы веб-разработки', categoryId: categories[0].id, level: CourseLevel.BEGINNER, lessonsCount: 12, shortDesc: 'HTML, CSS и JavaScript с нуля' },
-    { title: 'React для начинающих', categoryId: categories[0].id, level: CourseLevel.INTERMEDIATE, lessonsCount: 16, shortDesc: 'Компоненты, хуки и SPA' },
-    { title: 'UI/UX дизайн', categoryId: categories[1].id, level: CourseLevel.BEGINNER, lessonsCount: 10, shortDesc: 'Проектирование интерфейсов' },
-    { title: 'Анализ данных на Python', categoryId: categories[2].id, level: CourseLevel.INTERMEDIATE, lessonsCount: 14, shortDesc: 'Pandas, визуализация, отчёты' },
-    { title: 'Digital-маркетинг', categoryId: categories[3].id, level: CourseLevel.BEGINNER, lessonsCount: 8, shortDesc: 'Каналы привлечения и метрики' },
-    { title: 'Английский для IT', categoryId: categories[4].id, level: CourseLevel.BEGINNER, lessonsCount: 20, shortDesc: 'Технический английский' },
+    { title: 'Web-разработка', categoryId: categories[0].id, level: CourseLevel.BEGINNER, lessonsCount: 24, durationWeeks: 12, price: 1200, format: LearningFormat.HYBRID, shortDesc: 'HTML, CSS, JavaScript, React, Node.js' },
+    { title: 'React и современный frontend', categoryId: categories[0].id, level: CourseLevel.INTERMEDIATE, lessonsCount: 16, durationWeeks: 8, price: 1000, format: LearningFormat.ONLINE, shortDesc: 'Компоненты, хуки, маршрутизация и работа с API' },
+    { title: 'UI/UX Design', categoryId: categories[1].id, level: CourseLevel.BEGINNER, lessonsCount: 16, durationWeeks: 8, price: 900, format: LearningFormat.OFFLINE, shortDesc: 'Figma, основы UX/UI, проектирование интерфейсов' },
+    { title: 'Data Analytics', categoryId: categories[2].id, level: CourseLevel.INTERMEDIATE, lessonsCount: 20, durationWeeks: 10, price: 1100, format: LearningFormat.HYBRID, shortDesc: 'Работа с данными, таблицами и визуализацией' },
+    { title: 'Digital-маркетинг', categoryId: categories[3].id, level: CourseLevel.BEGINNER, lessonsCount: 8, durationWeeks: 4, price: 600, format: LearningFormat.ONLINE, shortDesc: 'Каналы привлечения, реклама и метрики' },
+    { title: 'Английский для IT', categoryId: categories[4].id, level: CourseLevel.BEGINNER, lessonsCount: 20, durationWeeks: 10, price: 700, format: LearningFormat.OFFLINE, shortDesc: 'Технический английский для разработчиков и дизайнеров' },
+    { title: 'Python', categoryId: categories[0].id, level: CourseLevel.BEGINNER, lessonsCount: 18, durationWeeks: 9, price: 1000, format: LearningFormat.HYBRID, shortDesc: 'Основы Python, алгоритмы и практические проекты' },
+    { title: 'Node.js для профессионалов', categoryId: categories[0].id, level: CourseLevel.ADVANCED, lessonsCount: 14, durationWeeks: 7, price: 1400, format: LearningFormat.ONLINE, shortDesc: 'Архитектура backend, REST API, базы данных и деплой' },
   ];
 
   const courses = await Promise.all(
@@ -110,20 +126,43 @@ async function main() {
       prisma.course.create({
         data: {
           ...c,
-          description: `${c.shortDesc}. Практический курс образовательного центра Somon.`,
-          durationWeeks: Math.ceil((c.lessonsCount || 10) / 2),
+          description: `${c.shortDesc}. Практический курс образовательного центра Somon: живые занятия, домашние задания с проверкой преподавателем и итоговый проект в портфолио.`,
           maxStudents: 16,
           status: CourseStatus.PUBLISHED,
-          format: LearningFormat.HYBRID,
         },
       })
     )
   );
 
+  const branches = [
+    await prisma.branch.create({
+      data: {
+        name: 'Somon Education — филиал №1',
+        address: 'г. Душанбе, пр. Рудаки 123',
+        phone: '+992 37 123 45 67',
+        workHours: 'Пн–Пт 9:00–19:00, Сб 10:00–16:00',
+        description: 'Главный кампус: компьютерные классы и зона коворкинга.',
+        classrooms: { create: ['101', '102', '203', '304'].map((n) => ({ name: `Аудитория ${n}`, capacity: 16 })) },
+      },
+      include: { classrooms: true },
+    }),
+    await prisma.branch.create({
+      data: {
+        name: 'Somon Education — филиал №2',
+        address: 'г. Душанбе, ул. Айни 45',
+        phone: '+992 37 765 43 21',
+        workHours: 'Пн–Сб 10:00–20:00',
+        description: 'Студия дизайна и переговорные для проектной работы.',
+        classrooms: { create: ['11', '12'].map((n) => ({ name: `Аудитория ${n}`, capacity: 12 })) },
+      },
+      include: { classrooms: true },
+    }),
+  ];
+
   // draft + archived for demo variety
   await prisma.course.create({
     data: {
-      title: 'Node.js Advanced (черновик)',
+      title: 'Мобильная разработка (черновик)',
       shortDesc: 'В разработке',
       categoryId: categories[0].id,
       status: CourseStatus.DRAFT,
@@ -197,19 +236,32 @@ async function main() {
 
   // Lessons ~30
   const lessons = [];
-  for (const group of groups.slice(0, 5)) {
+  const lessonTopics = ['Введение', 'Основы', 'Практикум', 'Углубление', 'Проект', 'Итоги'];
+  for (const [gi, group] of groups.slice(0, 5).entries()) {
+    const branch = branches[gi % 2];
     for (let i = 0; i < 6; i++) {
-      const start = days(-20 + i * 7 + groups.indexOf(group));
-      start.setHours(10 + (i % 3), 0, 0, 0);
+      const start = days(-20 + i * 7 + gi);
+      start.setHours(10 + ((i + gi) % 4) * 2, 0, 0, 0);
+      if (gi === 0 && i === 3) {
+        // guarantees an upcoming lesson "today" for dashboard / reminder demos
+        start.setTime(now.getTime() + 2 * 3600000);
+        start.setMinutes(0, 0, 0);
+      }
       const end = new Date(start.getTime() + 90 * 60000);
+      const online = (i + gi) % 2 === 1;
+      const classroom = branch.classrooms[i % branch.classrooms.length];
       const lesson = await prisma.lesson.create({
         data: {
           groupId: group.id,
-          title: `Занятие ${i + 1}: ${group.code}`,
+          teacherId: group.teacherId,
+          title: `${lessonTopics[i]} — ${courseDefs[gi].title}`,
           startsAt: start,
           endsAt: end,
-          format: LearningFormat.HYBRID,
-          room: `Ауд. ${100 + i}`,
+          format: online ? LearningFormat.ONLINE : LearningFormat.OFFLINE,
+          meetingUrl: online ? 'https://meet.google.com/somon-demo' : null,
+          branchId: online ? null : branch.id,
+          classroomId: online ? null : classroom.id,
+          room: online ? null : classroom.name,
           status: i < 3 ? LessonStatus.COMPLETED : LessonStatus.SCHEDULED,
         },
       });
@@ -218,18 +270,22 @@ async function main() {
   }
 
   // Materials
-  for (const course of courses.slice(0, 5)) {
+  for (const [ci, course] of courses.slice(0, 5).entries()) {
+    const group = groups[ci];
+    const author = teacherUsers.find((t) => t.teacher!.id === group.teacherId) ?? teacherUsers[0];
     for (let i = 0; i < 4; i++) {
       await prisma.material.create({
         data: {
           courseId: course.id,
-          title: `Материал ${i + 1}: ${course.title}`,
-          description: 'Учебный материал Somon',
-          topic: `Тема ${i + 1}`,
-          type: i % 2 === 0 ? MaterialType.PDF : MaterialType.NOTE,
-          fileUrl: i % 2 === 0 ? null : null,
+          groupId: group.id,
+          title: `Урок ${i + 1}. ${lessonTopics[i]} — ${course.title}`,
+          description: 'Конспект урока, примеры и ссылки для самостоятельной подготовки.',
+          topic: lessonTopics[i],
+          type: i === 1 ? MaterialType.VIDEO : i === 3 ? MaterialType.LINK : MaterialType.NOTE,
+          videoUrl: i === 1 ? 'https://www.youtube.com/watch?v=W6NZfCO5SIk' : null,
+          linkUrl: i === 3 ? 'https://developer.mozilla.org/ru/' : null,
           sortOrder: i,
-          authorId: teacherUsers[0].id,
+          authorId: author.id,
         },
       });
     }
@@ -270,6 +326,10 @@ async function main() {
           text: 'Мой ответ на задание Somon',
           submittedAt: days(-2),
           status: graded ? SubmissionStatus.GRADED : SubmissionStatus.SUBMITTED,
+          attemptCount: 1,
+          attempts: {
+            create: { number: 1, text: 'Мой ответ на задание Somon', submittedAt: days(-2) },
+          },
         },
       });
       if (graded) {
@@ -363,10 +423,70 @@ async function main() {
         ...item,
         description: `Открытый материал библиотеки Somon: ${item.title}`,
         authorId: admin.id,
-        linkUrl: item.type === 'LINK' ? 'https://example.com' : null,
+        linkUrl: item.type === 'LINK' ? 'https://git-scm.com/book/ru/v2' : null,
       },
     });
   }
+  await prisma.publicMaterial.create({
+    data: {
+      title: 'Видео: JavaScript за час',
+      description: 'Вводная видеолекция по JavaScript для самостоятельного изучения.',
+      category: 'Программирование',
+      type: MaterialType.VIDEO,
+      level: CourseLevel.BEGINNER,
+      videoUrl: 'https://www.youtube.com/watch?v=W6NZfCO5SIk',
+      authorId: admin.id,
+    },
+  });
+  await prisma.publicMaterial.create({
+    data: {
+      title: 'Чек-лист итогового проекта (для студентов Web-разработки)',
+      description: 'Требования к итоговому проекту курса. Доступно только студентам курса.',
+      category: 'Программирование',
+      type: MaterialType.NOTE,
+      level: CourseLevel.BEGINNER,
+      isPublic: false,
+      courseId: courses[0].id,
+      authorId: admin.id,
+    },
+  });
+
+  // Public news
+  const newsDefs = [
+    { title: 'Открыт набор в группу Web-разработки', category: 'Набор в группы', summary: 'Стартуем новую группу по Web-разработке: HTML, CSS, JavaScript и React.', daysAgo: 2 },
+    { title: 'Новый курс Data Analytics', category: 'Новые курсы', summary: 'Запускаем курс по анализу данных: таблицы, SQL-основы и визуализация.', daysAgo: 6 },
+    { title: 'День открытых дверей в Somon', category: 'Мероприятия', summary: 'Приглашаем познакомиться с преподавателями, посмотреть аудитории и пройти пробное занятие.', daysAgo: 10 },
+    { title: 'Выпускники UI/UX Design защитили проекты', category: 'Достижения студентов', summary: 'Студенты представили прототипы мобильных приложений для реальных заказчиков.', daysAgo: 18 },
+  ];
+  for (const n of newsDefs) {
+    await prisma.news.create({
+      data: {
+        title: n.title,
+        summary: n.summary,
+        body: `${n.summary}\n\nПодробности можно узнать у администратора Somon по телефону или в любом из наших филиалов. Следите за новостями центра!`,
+        category: n.category,
+        isPublished: true,
+        publishedAt: days(-n.daysAgo),
+        authorId: admin.id,
+      },
+    });
+  }
+  await prisma.news.create({
+    data: {
+      title: 'Черновик: летний интенсив',
+      body: 'Новость в работе, не опубликована.',
+      category: 'Новости центра',
+      isPublished: false,
+      authorId: admin.id,
+    },
+  });
+
+  await prisma.siteSetting.createMany({
+    data: [
+      { key: 'social.instagram', value: 'https://instagram.com/' },
+      { key: 'social.telegram', value: 'https://t.me/' },
+    ],
+  });
 
   // Achievements + activity for student1
   const achDefs = [

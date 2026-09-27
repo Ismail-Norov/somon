@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { publicUserSelect } from '../lib/selects';
 
 export async function notifyUser(userId: string, type: string, title: string, body?: string) {
   return prisma.notification.create({
@@ -16,7 +17,7 @@ export async function notifyUsers(userIds: string[], type: string, title: string
 export async function getGroupStudentUserIds(groupId: string) {
   const rows = await prisma.groupStudent.findMany({
     where: { groupId, status: 'ACTIVE' },
-    include: { student: { include: { user: true } } },
+    include: { student: { include: { user: { select: publicUserSelect } } } },
   });
   return rows.map((r) => r.student.userId);
 }

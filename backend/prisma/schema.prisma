@@ -125,6 +125,7 @@ model User {
   materials      Material[]      @relation("MaterialAuthor")
   announcements  Announcement[]  @relation("AnnouncementAuthor")
   publicMaterials PublicMaterial[] @relation("PublicMaterialAuthor")
+  news            News[]           @relation("NewsAuthor")
 
   @@index([role, status])
   @@index([email])
@@ -156,13 +157,17 @@ model Teacher {
   id             String   @id @default(cuid())
   userId         String   @unique
   specialization String?
+  position       String?
+  phone          String?
   bio            String?
+  isPublic       Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  groups Group[]
-  grades Grade[]
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  groups  Group[]
+  grades  Grade[]
+  lessons Lesson[]
 
   @@index([userId])
 }
@@ -187,6 +192,7 @@ model Course {
   maxStudents     Int          @default(20)
   status          CourseStatus @default(DRAFT)
   imageUrl        String?
+  price           Float?
   format          LearningFormat @default(HYBRID)
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
@@ -197,6 +203,7 @@ model Course {
   assignments        Assignment[]
   enrollments        Enrollment[]
   courseApplications CourseApplication[]
+  publicMaterials    PublicMaterial[]
 
   @@index([status])
   @@index([categoryId])
@@ -224,6 +231,7 @@ model Group {
   lessons        Lesson[]
   assignments    Assignment[]
   announcements  Announcement[]
+  materials      Material[]
 
   @@index([courseId])
   @@index([teacherId])
@@ -246,23 +254,31 @@ model GroupStudent {
 }
 
 model Lesson {
-  id         String       @id @default(cuid())
-  groupId    String
-  title      String
-  startsAt   DateTime
-  endsAt     DateTime
-  format     LearningFormat @default(HYBRID)
-  room       String?
-  meetingUrl String?
-  comment    String?
-  status     LessonStatus @default(SCHEDULED)
-  createdAt  DateTime     @default(now())
-  updatedAt  DateTime     @updatedAt
+  id             String       @id @default(cuid())
+  groupId        String
+  teacherId      String?
+  branchId       String?
+  classroomId    String?
+  title          String
+  startsAt       DateTime
+  endsAt         DateTime
+  format         LearningFormat @default(HYBRID)
+  room           String?
+  meetingUrl     String?
+  comment        String?
+  status         LessonStatus @default(SCHEDULED)
+  reminderSentAt DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   group       Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  teacher     Teacher?     @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  branch      Branch?      @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  classroom   Classroom?   @relation(fields: [classroomId], references: [id], onDelete: SetNull)
   materials   Material[]
   assignments Assignment[]
   attendance  Attendance[]
+  grades      Grade[]
 
   @@index([groupId])
   @@index([startsAt])
@@ -280,18 +296,37 @@ model Material {
   type        MaterialType @default(NOTE)
   fileUrl     String?
   fileName    String?
+  linkUrl     String?
+  videoUrl    String?
   sortOrder   Int          @default(0)
   authorId    String?
   publishedAt DateTime     @default(now())
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
-  course Course? @relation(fields: [courseId], references: [id])
-  lesson Lesson? @relation(fields: [lessonId], references: [id])
-  author User?   @relation("MaterialAuthor", fields: [authorId], references: [id])
+  course Course?        @relation(fields: [courseId], references: [id])
+  lesson Lesson?        @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+  group  Group?         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  author User?          @relation("MaterialAuthor", fields: [authorId], references: [id])
+  files  MaterialFile[]
 
   @@index([courseId])
   @@index([lessonId])
+  @@index([groupId])
+}
+
+model MaterialFile {
+  id           String   @id @default(cuid())
+  materialId   String
+  url          String
+  originalName String
+  size         Int
+  mimeType     String
+  createdAt    DateTime @default(now())
+
+  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@index([materialId])
 }
 
 model Assignment {
@@ -305,7 +340,10 @@ model Assignment {
   deadline    DateTime?
   maxScore    Float            @default(5)
   status      AssignmentStatus @default(DRAFT)
-  attachmentUrl String?
+  attachmentUrl  String?
+  attachmentName String?
+  allowResubmit  Boolean       @default(true)
+  publishAt      DateTime?
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 
@@ -329,16 +367,46 @@ model Submission {
   fileName     String?
   submittedAt  DateTime?
   status       SubmissionStatus @default(DRAFT)
+  attemptCount Int              @default(0)
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
 
-  assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
-  student    Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  assignment Assignment          @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  student    Student             @relation(fields: [studentId], references: [id], onDelete: Cascade)
   grade      Grade?
+  attempts   SubmissionAttempt[]
 
   @@unique([assignmentId, studentId])
   @@index([studentId])
   @@index([status])
+}
+
+/// One row per "Send" click. Submission holds the latest (current) version.
+model SubmissionAttempt {
+  id           String   @id @default(cuid())
+  submissionId String
+  number       Int
+  text         String?
+  submittedAt  DateTime @default(now())
+
+  submission Submission       @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  files      SubmissionFile[]
+
+  @@unique([submissionId, number])
+}
+
+model SubmissionFile {
+  id           String   @id @default(cuid())
+  attemptId    String
+  url          String
+  originalName String
+  size         Int
+  mimeType     String
+  createdAt    DateTime @default(now())
+
+  attempt SubmissionAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@index([attemptId])
 }
 
 model Grade {
@@ -347,6 +415,7 @@ model Grade {
   studentId    String
   teacherId    String?
   assignmentId String?
+  lessonId     String?
   score        Float
   maxScore     Float    @default(5)
   comment      String?
@@ -356,6 +425,7 @@ model Grade {
   submission Submission? @relation(fields: [submissionId], references: [id], onDelete: SetNull)
   student    Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
   teacher    Teacher?    @relation(fields: [teacherId], references: [id])
+  lesson     Lesson?     @relation(fields: [lessonId], references: [id], onDelete: SetNull)
 
   @@index([studentId])
   @@index([teacherId])
@@ -384,6 +454,7 @@ model Notification {
   type      String
   title     String
   body      String?
+  link      String?
   readAt    DateTime?
   createdAt DateTime  @default(now())
 
@@ -484,13 +555,71 @@ model PublicMaterial {
   fileUrl     String?
   fileName    String?
   linkUrl     String?
+  videoUrl    String?
+  /// false = visible only to students of `courseId`
+  isPublic    Boolean      @default(true)
+  courseId    String?
   publishedAt DateTime     @default(now())
   createdAt   DateTime     @default(now())
 
-  author User? @relation("PublicMaterialAuthor", fields: [authorId], references: [id])
+  author User?   @relation("PublicMaterialAuthor", fields: [authorId], references: [id])
+  course Course? @relation(fields: [courseId], references: [id], onDelete: SetNull)
 
   @@index([category])
   @@index([publishedAt])
+}
+
+model Branch {
+  id          String   @id @default(cuid())
+  name        String
+  address     String
+  phone       String?
+  description String?
+  workHours   String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  classrooms Classroom[]
+  lessons    Lesson[]
+}
+
+model Classroom {
+  id        String   @id @default(cuid())
+  branchId  String
+  name      String
+  capacity  Int?
+  createdAt DateTime @default(now())
+
+  branch  Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  lessons Lesson[]
+
+  @@unique([branchId, name])
+}
+
+model News {
+  id          String    @id @default(cuid())
+  title       String
+  summary     String?
+  body        String
+  category    String    @default("Новости центра")
+  imageUrl    String?
+  isPublished Boolean   @default(false)
+  publishedAt DateTime?
+  authorId    String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  author User? @relation("NewsAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([isPublished, publishedAt])
+}
+
+/// Key/value settings editable by admin (contacts, public stats overrides, about text).
+model SiteSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
 }
 
 model CourseApplication {

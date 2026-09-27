@@ -39,7 +39,7 @@ const upload = multer({
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Разрешены только изображения (JPG, PNG, GIF)'));
+      cb(new AppError('Разрешены только изображения (JPG, PNG, GIF)', 400, 'INVALID_FILE_TYPE') as unknown as Error);
     }
   },
 });
@@ -149,6 +149,9 @@ router.patch(
       include: { student: true, teacher: true },
     });
     if (!existing) throw new AppError('Пользователь не найден', 404, 'NOT_FOUND');
+    if (id === req.user!.id && ((body.status && body.status !== 'ACTIVE') || (body.role && body.role !== Role.ADMIN))) {
+      throw new AppError('Нельзя заблокировать себя или снять с себя роль администратора', 400, 'SELF_LOCKOUT');
+    }
 
     const passwordHash = body.password ? await bcrypt.hash(body.password, 10) : undefined;
     const user = await prisma.user.update({
@@ -161,6 +164,13 @@ router.patch(
         passwordHash,
       },
     });
+
+    if (body.role === Role.STUDENT && !existing.student) {
+      await prisma.student.create({ data: { userId: id, phone: body.phone } });
+    }
+    if (body.role === Role.TEACHER && !existing.teacher) {
+      await prisma.teacher.create({ data: { userId: id, specialization: body.specialization } });
+    }
 
     if (existing.student && body.phone !== undefined) {
       await prisma.student.update({ where: { id: existing.student.id }, data: { phone: body.phone } });
@@ -181,6 +191,9 @@ router.patch(
   '/:id/archive',
   requireRole(Role.ADMIN),
   asyncHandler(async (req, res) => {
+    if (req.params.id === req.user!.id) {
+      throw new AppError('Нельзя архивировать собственный аккаунт', 400, 'SELF_LOCKOUT');
+    }
     const user = await prisma.user.update({
       where: { id: req.params.id },
       data: { status: UserStatus.ARCHIVED },

@@ -1,331 +1,322 @@
 'use client';
 
-import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import { Button } from '@/components/ui/Button';
-import { api } from '@/lib/api';
-import { LoadingState, ErrorState } from '@/components/ui/States';
+import { PublicShell } from '@/components/public/PublicShell';
+import { CourseCard, NewsCard, PublicMaterialCard, TeacherCard } from '@/components/public/Cards';
+import { ABOUT_FEATURES, LEARNING_RESULTS } from '@/components/public/content';
+import { ButtonLink } from '@/components/ui/Button';
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/States';
+import { useApiData } from '@/lib/useApiData';
+import { useAuth, dashboardPath } from '@/lib/auth';
+import type { Branch, NewsItem, PublicCourse, PublicMaterial, PublicStat, PublicTeacher, SiteSettings } from '@/lib/types';
 
-type Course = {
-  id: string;
-  title: string;
-  shortDesc?: string;
-  level: string;
-  durationWeeks?: number;
-  lessonsCount?: number;
-  category?: { name: string };
-  groups: { id: string; code: string; _count: { groupStudents: number }; capacity: number }[];
+type Overview = {
+  settings: SiteSettings;
+  stats: PublicStat[];
+  courses: PublicCourse[];
+  teachers: PublicTeacher[];
+  news: NewsItem[];
+  materials: PublicMaterial[];
+  branches: Branch[];
 };
 
-type Teacher = {
-  id: string;
-  user: { firstName: string; lastName: string; status: string };
-  specialization?: string;
-  bio?: string;
-};
-
-type StatItem = {
-  label: string;
-  value: string;
-};
+function HeroVisual() {
+  return (
+    <div className="hero-visual" aria-hidden>
+      <div className="hero-panel hero-panel-main">
+        <header>
+          <div>
+            <p style={{ margin: 0, fontSize: '0.85rem' }}>Общий прогресс</p>
+            <h4 style={{ margin: 0 }}>Web-разработка</h4>
+          </div>
+          <div className="hero-progress-ring">
+            <span>78%</span>
+          </div>
+        </header>
+        <div className="hero-bars">
+          {[
+            ['Занятия', 80],
+            ['Задания', 75],
+            ['Посещаемость', 85],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <div className="row space-between">
+                <span>{label}</span>
+                <strong>{value}%</strong>
+              </div>
+              <div className="progress">
+                <span style={{ width: `${value}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="hero-panel hero-panel-grade">
+        <span style={{ fontSize: '1.6rem' }}>🏅</span>
+        <div>
+          <p style={{ margin: 0, fontSize: '0.8rem' }}>Задание проверено</p>
+          <strong>5 / 5</strong>
+        </div>
+      </div>
+      <div className="hero-panel hero-panel-lesson">
+        <p>Ближайшее занятие · сегодня</p>
+        <h4 style={{ margin: '0.35rem 0' }}>JavaScript: функции</h4>
+        <p>15:00–16:30 · 🟢 Онлайн</p>
+      </div>
+    </div>
+  );
+}
 
 export default function LandingPage() {
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [teachers, setTeachers] = useState<Teacher[]>([]);
-  const [stats, setStats] = useState<StatItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        const [coursesData, teachersData] = await Promise.all([
-          api<Course[]>('/api/courses/public'),
-          api<Teacher[]>('/api/teachers/public'),
-        ]);
-        setCourses(coursesData);
-        setTeachers(teachersData);
-        
-        // Calculate stats from real data
-        setStats([
-          { label: 'Студентов', value: '50+' },
-          { label: 'Курсов', value: coursesData.length.toString() },
-          { label: 'Преподавателей', value: teachersData.length.toString() },
-          { label: 'Направлений', value: '5+' },
-        ]);
-      } catch (e) {
-        setError('Не удалось загрузить данные');
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadData();
-  }, []);
-
-  if (loading) return <LoadingState />;
-  if (error) return <ErrorState message={error} />;
+  const { user } = useAuth();
+  const { data, loading, error, reload } = useApiData<Overview>('/api/public/overview');
+  const settings = data?.settings;
 
   return (
-    <div>
-      <header className="public-header">
-        <Link href="/" className="brand">
-          Somon
-        </Link>
-        <nav className="public-nav">
-          <Link href="/">Главная</Link>
-          <Link href="/courses">Курсы</Link>
-          <a href="#about">О центре</a>
-          <a href="#teachers">Преподаватели</a>
-          <a href="#news">Новости</a>
-          <a href="#materials">Материалы</a>
-          <a href="#contacts">Контакты</a>
-          <Link href="/login">
-            <Button>Войти</Button>
-          </Link>
-        </nav>
-      </header>
-
+    <PublicShell>
       <section className="hero">
-        <div className="hero-content">
-          <h1>Учись. Развивайся. Достигай большего вместе с Somon.</h1>
-          <p className="hero-description">
-            Современный образовательный центр с практическим подходом к обучению. 
-            Web-разработка, дизайн, аналитика данных и многое другое под руководством опытных преподавателей.
-          </p>
-          <div className="hero-buttons">
-            <Link href="/courses">
-              <Button>Смотреть курсы</Button>
-            </Link>
-            <a href="#about">
-              <Button variant="secondary">Подробнее о Somon</Button>
-            </a>
-          </div>
-        </div>
-        <div className="hero-image">
-          <div className="hero-card">
-            <h2>Начните обучение сегодня</h2>
-            <p>Присоединяйтесь к сообществу студентов и получите современные навыки для успешной карьеры.</p>
-          </div>
-        </div>
-      </section>
-
-      <section className="section" id="courses">
-        <div className="section-header">
-          <h2>Наши курсы</h2>
-          <p>Выберите направление и начните обучение с лучшими преподавателями</p>
-        </div>
-        <div className="grid grid-3">
-          {courses.slice(0, 6).map((course) => (
-            <Link key={course.id} href={`/courses/${course.id}`} className="course-card">
-              <div className="course-level">
-                <span className="badge">{course.level}</span>
-                <span className="badge">{course.category?.name || 'Общий'}</span>
-              </div>
-              <h3>{course.title}</h3>
-              <p className="course-desc">{course.shortDesc}</p>
-              <div className="course-meta">
-                <span>📚 {course.lessonsCount || 0} занятий</span>
-                <span>⏱ {course.durationWeeks || 0} недель</span>
-              </div>
-              <div className="course-footer">
-                <span>Групп: {course.groups.length}</span>
-                <Button variant="secondary" size="sm">Подробнее</Button>
-              </div>
-            </Link>
-          ))}
-        </div>
-        <div style={{ textAlign: 'center', marginTop: '2rem' }}>
-          <Link href="/courses">
-            <Button>Все курсы</Button>
-          </Link>
-        </div>
-      </section>
-
-      <section className="section section-alt" id="about">
-        <div className="section-header">
-          <h2>О Somon</h2>
-          <p>Почему выбирают нас для обучения</p>
-        </div>
-        <div className="grid grid-4">
-          {[
-            { icon: '🎯', title: 'Практика', desc: 'Студенты не только изучают теорию, но и выполняют практические задания и проекты' },
-            { icon: '👨‍🏫', title: 'Опытные преподаватели', desc: 'Обучение проводят специалисты по соответствующим направлениям с реальным опытом' },
-            { icon: '📊', title: 'Прогресс', desc: 'Студент может отслеживать собственные результаты и динамику обучения' },
-            { icon: '💻', title: 'Современный формат', desc: 'Очное и онлайн-обучение для вашего удобства и гибкости' },
-          ].map(({ icon, title, desc }) => (
-            <div className="feature-card" key={title}>
-              <div className="feature-icon">{icon}</div>
-              <h3>{title}</h3>
-              <p>{desc}</p>
+        <div className="hero-inner">
+          <div>
+            <span className="eyebrow">Образовательный центр Somon</span>
+            <h1>
+              Учись. Развивайся. <em>Достигай большего</em> вместе с Somon.
+            </h1>
+            <p className="hero-description">
+              {settings?.['site.description'] ||
+                'Современный образовательный центр с практическим подходом: программирование, дизайн, аналитика данных и цифровые профессии.'}
+            </p>
+            <div className="hero-buttons">
+              <ButtonLink href="/courses" size="lg">
+                Смотреть курсы
+              </ButtonLink>
+              <ButtonLink href="/about" variant="secondary" size="lg">
+                Подробнее о Somon
+              </ButtonLink>
             </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="section" id="statistics">
-        <div className="section-header">
-          <h2>Достижения Somon</h2>
-          <p>Наши результаты в цифрах</p>
-        </div>
-        <div className="stats-grid">
-          {stats.map((stat) => (
-            <div className="stat-card" key={stat.label}>
-              <div className="stat-value">{stat.value}</div>
-              <div className="stat-label">{stat.label}</div>
+            <div className="hero-points">
+              <span>✓ Практика с первого занятия</span>
+              <span>✓ Онлайн и офлайн</span>
+              <span>✓ Прогресс в личном кабинете</span>
             </div>
-          ))}
+          </div>
+          <HeroVisual />
         </div>
       </section>
 
-      <section className="section section-alt" id="results">
-        <div className="section-header">
-          <h2>Что получает студент после обучения</h2>
-          <p>Наши выпускники успешно работают в ведущих компаниях</p>
+      {loading && <LoadingState />}
+      {error && (
+        <div className="container section">
+          <ErrorState onRetry={reload} />
         </div>
-        <div className="grid grid-3">
-          {[
-            { title: 'Новые знания', desc: 'Глубокое понимание выбранной области и современных технологий' },
-            { title: 'Практический опыт', desc: 'Реальные проекты и задания для портфолио' },
-            { title: 'Выполненные проекты', desc: 'Портфолио работ для демонстрации работодателям' },
-            { title: 'Оценки и результаты', desc: 'Честная оценка знаний и прозрачный прогресс' },
-            { title: 'Поддержка', desc: 'Помощь на всех этапах обучения от преподавателей' },
-            { title: 'Карьерные возможности', desc: 'Помощь в трудоустройстве и карьерном росте' },
-          ].slice(0, 6).map(({ title, desc }) => (
-            <div className="result-card" key={title}>
-              <h3>{title}</h3>
-              <p>{desc}</p>
-            </div>
-          ))}
-        </div>
-      </section>
+      )}
 
-      <section className="section" id="teachers">
-        <div className="section-header">
-          <h2>Наши преподаватели</h2>
-          <p>Профессионалы с реальным опытом в своей области</p>
-        </div>
-        <div className="grid grid-3">
-          {teachers.slice(0, 6).map((teacher) => (
-            <div className="teacher-card" key={teacher.id}>
-              <div className="teacher-avatar">
-                {teacher.user.firstName[0]}{teacher.user.lastName[0]}
+      {data && (
+        <>
+          <section className="section" id="courses">
+            <div className="container">
+              <div className="section-header">
+                <span className="eyebrow">Наши курсы</span>
+                <h2>Выберите направление обучения</h2>
+                <p>Все курсы ведут практикующие преподаватели. Программы обновляются администратором центра.</p>
               </div>
-              <h3>{teacher.user.firstName} {teacher.user.lastName}</h3>
-              <p className="teacher-role">{teacher.specialization || 'Преподаватель'}</p>
-              <p className="teacher-bio">{teacher.bio || 'Опытный преподаватель с большим практическим опытом'}</p>
+              {data.courses.length === 0 ? (
+                <EmptyState title="Курсы скоро появятся" description="Мы готовим новые программы обучения." />
+              ) : (
+                <div className="grid grid-3">
+                  {data.courses.map((course) => (
+                    <CourseCard key={course.id} course={course} />
+                  ))}
+                </div>
+              )}
+              <div className="section-footer">
+                <ButtonLink href="/courses" variant="secondary">
+                  Все курсы и фильтры →
+                </ButtonLink>
+              </div>
             </div>
-          ))}
-        </div>
-      </section>
+          </section>
 
-      <section className="section section-alt" id="news">
-        <div className="section-header">
-          <h2>Новости Somon</h2>
-          <p>Последние события и объявления образовательного центра</p>
-        </div>
-        <div className="news-grid">
-          <div className="news-card">
-            <div className="news-date">Сентябрь 2024</div>
-            <h3>Открыт набор на новые курсы</h3>
-            <p>Мы запускаем новые группы по веб-разработке и аналитике данных. Запишитесь сейчас!</p>
-            <Button variant="secondary" size="sm">Подробнее</Button>
-          </div>
-          <div className="news-card">
-            <div className="news-date">Сентябрь 2024</div>
-            <h3>Расширенение направления дизайна</h3>
-            <p>Добавляем курсы по UI/UX дизайну и графическому дизайну для расширения наших образовательных программ.</p>
-            <Button variant="secondary" size="sm">Подробнее</Button>
-          </div>
-          <div className="news-card">
-            <div className="news-date">Август 2024</div>
-            <h3>Первые выпускники</h3>
-            <p>Поздравляем наших первых студентов с успешным завершением курса веб-разработки!</p>
-            <Button variant="secondary" size="sm">Подробнее</Button>
-          </div>
-        </div>
-      </section>
+          <section className="section section-alt" id="about">
+            <div className="container">
+              <div className="section-header">
+                <span className="eyebrow">О Somon</span>
+                <h2>Кто мы и как учим</h2>
+                <p>{settings?.['about.text']}</p>
+              </div>
+              <div className="grid grid-3">
+                {ABOUT_FEATURES.map((f) => (
+                  <div className="feature-card" key={f.title}>
+                    <div className="feature-icon" aria-hidden>
+                      {f.icon}
+                    </div>
+                    <h3>{f.title}</h3>
+                    <p>{f.text}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
 
-      <section className="section" id="materials">
-        <div className="section-header">
-          <h2>Открытые материалы</h2>
-          <p>Библиотека полезных ресурсов для самостоятельного обучения</p>
-        </div>
-        <div className="materials-grid">
-          <div className="material-card">
-            <div className="material-type">📄 PDF</div>
-            <h3>Основы веб-разработки</h3>
-            <p>Введение в HTML, CSS и JavaScript для начинающих</p>
-            <Button variant="secondary" size="sm">Открыть</Button>
-          </div>
-          <div className="material-card">
-            <div className="material-type">🎥 Видео</div>
-            <h3>Git и GitHub для начинающих</h3>
-            <p>Полный гайд по системе контроля версий</p>
-            <Button variant="secondary" size="sm">Смотреть</Button>
-          </div>
-          <div className="material-card">
-            <div className="material-type">📊 Инфографика</div>
-            <h3>Путь в IT</h3>
-            <p>Карта развития карьеры в технологической сфере</p>
-            <Button variant="secondary" size="sm">Открыть</Button>
-          </div>
-        </div>
-      </section>
+          <section className="section" id="stats">
+            <div className="container">
+              <div className="stats-band">
+                {data.stats.map((s) => (
+                  <div className="stat" key={s.key}>
+                    <div className="stat-value">{s.value}</div>
+                    <div className="stat-label">{s.label}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
 
-      <section className="section" id="contacts">
-        <div className="section-header">
-          <h2>Контакты</h2>
-          <p>Свяжитесь с нами для получения дополнительной информации</p>
-        </div>
-        <div className="contacts-grid">
-          <div className="contact-card">
-            <h3>📍 Адрес</h3>
-            <p>г. Душанбе, пр. Рудаки 123</p>
-            <p>Филиал №1 образовательного центра</p>
-          </div>
-          <div className="contact-card">
-            <h3>📞 Телефон</h3>
-            <p>+992 37 123 45 67</p>
-            <p>+992 37 987 65 43</p>
-          </div>
-          <div className="contact-card">
-            <h3>✉️ Email</h3>
-            <p>info@somon.tj</p>
-            <p>admissions@somon.tj</p>
-          </div>
-          <div className="contact-card">
-            <h3>🕐 Время работы</h3>
-            <p>Пн-Пт: 9:00 - 18:00</p>
-            <p>Сб: 10:00 - 16:00</p>
-          </div>
-        </div>
-        <div className="social-links">
-          <a href="#" className="social-link">Instagram</a>
-          <a href="#" className="social-link">Facebook</a>
-          <a href="#" className="social-link">Telegram</a>
-          <a href="#" className="social-link">YouTube</a>
-        </div>
-      </section>
+          <section className="section section-alt" id="results">
+            <div className="container">
+              <div className="section-header">
+                <span className="eyebrow">Результаты обучения</span>
+                <h2>Что получает студент после обучения</h2>
+              </div>
+              <div className="grid grid-3">
+                {LEARNING_RESULTS.map((r) => (
+                  <div className="result-card" key={r.title}>
+                    <div className="feature-icon" aria-hidden>
+                      {r.icon}
+                    </div>
+                    <div>
+                      <h3>{r.title}</h3>
+                      <p>{r.text}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
 
-      <footer className="footer">
-        <div className="footer-content">
-          <div className="footer-brand">
-            <strong>Somon</strong>
-            <p>Веб-приложение для управления образовательным центром</p>
-          </div>
-          <div className="footer-nav">
-            <Link href="/">Главная</Link>
-            <Link href="/courses">Курсы</Link>
-            <a href="#about">О центре</a>
-            <a href="#teachers">Преподаватели</a>
-            <a href="#contacts">Контакты</a>
-          </div>
-          <div className="footer-legal">
-            <p>© 2024 Somon. Все права защищены.</p>
-            <p>demo@somon.local</p>
-          </div>
-        </div>
-      </footer>
-    </div>
+          <section className="section" id="teachers">
+            <div className="container">
+              <div className="section-header">
+                <span className="eyebrow">Преподаватели</span>
+                <h2>Наши преподаватели</h2>
+                <p>Специалисты с реальным опытом работы в своей области.</p>
+              </div>
+              {data.teachers.length === 0 ? (
+                <EmptyState title="Информация о преподавателях скоро появится" />
+              ) : (
+                <div className="grid grid-3">
+                  {data.teachers.map((t) => (
+                    <TeacherCard key={t.id} teacher={t} />
+                  ))}
+                </div>
+              )}
+              <div className="section-footer">
+                <ButtonLink href="/teachers" variant="secondary">
+                  Все преподаватели →
+                </ButtonLink>
+              </div>
+            </div>
+          </section>
+
+          <section className="section section-alt" id="news">
+            <div className="container">
+              <div className="section-header">
+                <span className="eyebrow">Новости</span>
+                <h2>Новости Somon</h2>
+                <p>Новые курсы, наборы в группы, мероприятия и достижения студентов.</p>
+              </div>
+              {data.news.length === 0 ? (
+                <EmptyState title="Новостей пока нет" />
+              ) : (
+                <div className="grid grid-3">
+                  {data.news.map((n) => (
+                    <NewsCard key={n.id} item={n} />
+                  ))}
+                </div>
+              )}
+              <div className="section-footer">
+                <ButtonLink href="/news" variant="secondary">
+                  Все новости →
+                </ButtonLink>
+              </div>
+            </div>
+          </section>
+
+          <section className="section" id="materials">
+            <div className="container">
+              <div className="section-header">
+                <span className="eyebrow">Библиотека</span>
+                <h2>Открытые материалы</h2>
+                <p>Статьи, видео и полезные ресурсы для самостоятельного обучения.</p>
+              </div>
+              {data.materials.length === 0 ? (
+                <EmptyState title="Материалов пока нет" />
+              ) : (
+                <div className="grid grid-3">
+                  {data.materials.map((m) => (
+                    <PublicMaterialCard key={m.id} material={m} />
+                  ))}
+                </div>
+              )}
+              <div className="section-footer">
+                <ButtonLink href="/materials" variant="secondary">
+                  Вся библиотека →
+                </ButtonLink>
+              </div>
+            </div>
+          </section>
+
+          <section className="section section-alt" id="contacts">
+            <div className="container">
+              <div className="section-header">
+                <span className="eyebrow">Контакты</span>
+                <h2>Приходите знакомиться</h2>
+              </div>
+              <div className="grid grid-4">
+                <div className="contact-card">
+                  <h3>📞 Телефон</h3>
+                  <a href={`tel:${settings?.['contact.phone']}`}>{settings?.['contact.phone']}</a>
+                </div>
+                <div className="contact-card">
+                  <h3>✉️ Email</h3>
+                  <a href={`mailto:${settings?.['contact.email']}`}>{settings?.['contact.email']}</a>
+                </div>
+                <div className="contact-card">
+                  <h3>📍 Адрес</h3>
+                  <p>{settings?.['contact.address']}</p>
+                  {data.branches.length > 1 && <p className="muted">и ещё {data.branches.length - 1} филиал(а)</p>}
+                </div>
+                <div className="contact-card">
+                  <h3>🕐 Время работы</h3>
+                  <p>{settings?.['contact.workHours']}</p>
+                </div>
+              </div>
+              <div className="section-footer">
+                <ButtonLink href="/contacts" variant="secondary">
+                  Все контакты и филиалы →
+                </ButtonLink>
+              </div>
+            </div>
+          </section>
+
+          <section className="section">
+            <div className="container">
+              <div className="cta">
+                <div>
+                  <h2>Готовы начать обучение?</h2>
+                  <p>Создайте аккаунт, выберите курс и подайте заявку — администратор свяжется с вами.</p>
+                </div>
+                {user ? (
+                  <ButtonLink href={dashboardPath(user.role)} variant="light" size="lg">
+                    Перейти в личный кабинет
+                  </ButtonLink>
+                ) : (
+                  <ButtonLink href="/register" variant="light" size="lg">
+                    Зарегистрироваться
+                  </ButtonLink>
+                )}
+              </div>
+            </div>
+          </section>
+        </>
+      )}
+    </PublicShell>
   );
 }

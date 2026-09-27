@@ -15,6 +15,8 @@ import { audit } from '../services/notifications';
 
 const router = Router();
 
+const userTeacherSelect = { id: true, specialization: true, bio: true, position: true, phone: true } as const;
+
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
@@ -42,9 +44,10 @@ router.post(
         role: true,
         status: true,
         photoUrl: true,
+        createdAt: true,
         passwordHash: true,
         student: { select: { id: true, phone: true } },
-        teacher: { select: { id: true, specialization: true, bio: true } },
+        teacher: { select: userTeacherSelect },
       },
     });
 
@@ -95,8 +98,9 @@ router.post(
         role: true,
         status: true,
         photoUrl: true,
+        createdAt: true,
         student: { select: { id: true, phone: true } },
-        teacher: { select: { id: true, specialization: true, bio: true } },
+        teacher: { select: userTeacherSelect },
       },
     });
 
@@ -129,8 +133,9 @@ router.get(
         role: true,
         status: true,
         photoUrl: true,
+        createdAt: true,
         student: { select: { id: true, phone: true } },
-        teacher: { select: { id: true, specialization: true, bio: true } },
+        teacher: { select: userTeacherSelect },
       },
     });
     if (!user) throw new AppError('Пользователь не найден', 404, 'NOT_FOUND');
@@ -146,8 +151,15 @@ function serializeUser(user: {
   role: Role;
   status: string;
   photoUrl: string | null;
+  createdAt: Date;
   student?: { id: string; phone: string | null } | null;
-  teacher?: { id: string; specialization: string | null; bio: string | null } | null;
+  teacher?: {
+    id: string;
+    specialization: string | null;
+    bio: string | null;
+    position: string | null;
+    phone: string | null;
+  } | null;
 }) {
   return {
     id: user.id,
@@ -157,10 +169,12 @@ function serializeUser(user: {
     role: user.role,
     status: user.status,
     photoUrl: user.photoUrl,
+    createdAt: user.createdAt,
     studentId: user.student?.id ?? null,
     teacherId: user.teacher?.id ?? null,
-    phone: user.student?.phone ?? null,
+    phone: user.student?.phone ?? user.teacher?.phone ?? null,
     specialization: user.teacher?.specialization ?? null,
+    position: user.teacher?.position ?? null,
     bio: user.teacher?.bio ?? null,
   };
 }

@@ -1,79 +1,147 @@
 'use client';
 
-import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { useEffect, useMemo, useState } from 'react';
+import { PageHero, PublicShell } from '@/components/public/PublicShell';
+import { CourseCard } from '@/components/public/Cards';
 import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
+import { Input, Select } from '@/components/ui/Field';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/States';
-import { statusLabel } from '@/lib/format';
+import { useApiData } from '@/lib/useApiData';
+import { plural } from '@/lib/format';
+import type { PublicCourse } from '@/lib/types';
 
-type Course = {
-  id: string;
-  title: string;
-  shortDesc?: string;
-  level: string;
-  durationWeeks?: number;
-  category?: { name: string };
-  groups: { id: string; code: string; _count: { groupStudents: number }; capacity: number }[];
-};
+type Filters = { q: string; categoryId: string; level: string; format: string; duration: string };
+const EMPTY: Filters = { q: '', categoryId: '', level: '', format: '', duration: '' };
+
+const QUICK = [
+  { key: 'level', value: 'BEGINNER', label: 'Начальный' },
+  { key: 'level', value: 'INTERMEDIATE', label: 'Средний' },
+  { key: 'level', value: 'ADVANCED', label: 'Продвинутый' },
+  { key: 'format', value: 'ONLINE', label: 'Онлайн' },
+  { key: 'format', value: 'OFFLINE', label: 'Офлайн' },
+] as const;
 
 export default function PublicCoursesPage() {
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [q, setQ] = useState('');
+  const [filters, setFilters] = useState<Filters>(EMPTY);
+  const [debouncedQ, setDebouncedQ] = useState('');
+  const meta = useApiData<{ categories: { id: string; name: string }[] }>('/api/courses/public/meta');
 
   useEffect(() => {
-    setLoading(true);
-    api<Course[]>(`/api/courses/public${q ? `?q=${encodeURIComponent(q)}` : ''}`)
-      .then(setCourses)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [q]);
+    const t = setTimeout(() => setDebouncedQ(filters.q.trim()), 300);
+    return () => clearTimeout(t);
+  }, [filters.q]);
+
+  const query = useMemo(() => {
+    const params = new URLSearchParams();
+    if (debouncedQ) params.set('q', debouncedQ);
+    if (filters.categoryId) params.set('categoryId', filters.categoryId);
+    if (filters.level) params.set('level', filters.level);
+    if (filters.format) params.set('format', filters.format);
+    if (filters.duration) params.set('duration', filters.duration);
+    const s = params.toString();
+    return `/api/courses/public${s ? `?${s}` : ''}`;
+  }, [debouncedQ, filters.categoryId, filters.level, filters.format, filters.duration]);
+
+  const { data: courses, loading, error, reload } = useApiData<PublicCourse[]>(query);
+  const set = (patch: Partial<Filters>) => setFilters((f) => ({ ...f, ...patch }));
+  const hasFilters = Object.values(filters).some(Boolean);
 
   return (
-    <div>
-      <header className="public-header">
-        <Link href="/" className="brand">
-          Somon
-        </Link>
-        <nav className="public-nav">
-          <Link href="/login">
-            <Button>Войти</Button>
-          </Link>
-        </nav>
-      </header>
-      <section className="section">
-        <h1 className="page-title">Курсы Somon</h1>
-        <p className="page-sub">Опубликованные программы образовательного центра</p>
-        <input
-          className="input"
-          style={{ maxWidth: 360, marginBottom: '1rem' }}
-          placeholder="Поиск..."
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        {loading && <LoadingState />}
-        {error && <ErrorState message={error} />}
-        {!loading && !error && courses.length === 0 && (
-          <EmptyState title="Курсы не найдены" description="Попробуйте другой запрос" />
-        )}
-        <div className="grid grid-3">
-          {courses.map((c) => (
-            <Link key={c.id} href={`/courses/${c.id}`} className="card">
-              <div className="row space-between">
-                <h3>{c.title}</h3>
-                <Badge tone="brand">{statusLabel[c.level] || c.level}</Badge>
-              </div>
-              <p>{c.shortDesc}</p>
-              <p style={{ marginBottom: 0 }}>
-                {c.category?.name || 'Без категории'} · групп: {c.groups.length}
+    <PublicShell>
+      <PageHero
+        eyebrow="Каталог"
+        title="Курсы Somon"
+        description="Выберите направление, уровень и удобный формат обучения. Все курсы ведут практикующие преподаватели."
+      />
+      <section className="section" style={{ paddingTop: '2rem' }}>
+        <div className="container">
+          <div className="filters">
+            <Input
+              type="search"
+              placeholder="Поиск курса..."
+              value={filters.q}
+              onChange={(e) => set({ q: e.target.value })}
+              aria-label="Поиск курса"
+            />
+            <Select value={filters.categoryId} onChange={(e) => set({ categoryId: e.target.value })} aria-label="Категория">
+              <option value="">Все категории</option>
+              {meta.data?.categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </Select>
+            <Select value={filters.level} onChange={(e) => set({ level: e.target.value })} aria-label="Уровень">
+              <option value="">Любой уровень</option>
+              <option value="BEGINNER">Начальный</option>
+              <option value="INTERMEDIATE">Средний</option>
+              <option value="ADVANCED">Продвинутый</option>
+            </Select>
+            <Select value={filters.format} onChange={(e) => set({ format: e.target.value })} aria-label="Формат">
+              <option value="">Любой формат</option>
+              <option value="ONLINE">Онлайн</option>
+              <option value="OFFLINE">Офлайн</option>
+              <option value="HYBRID">Смешанный</option>
+            </Select>
+            <Select value={filters.duration} onChange={(e) => set({ duration: e.target.value })} aria-label="Длительность">
+              <option value="">Любая длительность</option>
+              <option value="short">до 1 месяца</option>
+              <option value="medium">1–2 месяца</option>
+              <option value="long">более 2 месяцев</option>
+            </Select>
+          </div>
+
+          <div className="filter-chips">
+            {QUICK.map((chip) => {
+              const active = filters[chip.key] === chip.value;
+              return (
+                <button
+                  key={chip.value}
+                  type="button"
+                  className={`filter-chip ${active ? 'active' : ''}`}
+                  aria-pressed={active}
+                  onClick={() => set({ [chip.key]: active ? '' : chip.value } as Partial<Filters>)}
+                >
+                  {chip.label}
+                </button>
+              );
+            })}
+            {hasFilters && (
+              <Button variant="ghost" size="sm" onClick={() => setFilters(EMPTY)}>
+                Сбросить фильтры
+              </Button>
+            )}
+          </div>
+
+          {loading && <LoadingState />}
+          {error && <ErrorState onRetry={reload} />}
+          {!loading && !error && courses && (
+            <>
+              <p className="results-count">
+                Найдено {courses.length} {plural(courses.length, ['курс', 'курса', 'курсов'])}
               </p>
-            </Link>
-          ))}
+              {courses.length === 0 ? (
+                <EmptyState
+                  icon="🔍"
+                  title="Курсы не найдены"
+                  description="Попробуйте изменить запрос или сбросить фильтры."
+                  action={
+                    <Button variant="secondary" onClick={() => setFilters(EMPTY)}>
+                      Сбросить фильтры
+                    </Button>
+                  }
+                />
+              ) : (
+                <div className="grid grid-3">
+                  {courses.map((c) => (
+                    <CourseCard key={c.id} course={c} />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
       </section>
-    </div>
+    </PublicShell>
   );
 }

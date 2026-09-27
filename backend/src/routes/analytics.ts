@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { Role } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { publicUserSelect } from '../lib/selects';
 import { AppError, ok } from '../lib/errors';
 import { asyncHandler } from '../middleware/error';
 import { requireAuth, requireRole } from '../middleware/auth';
@@ -21,7 +22,7 @@ router.get(
         group: {
           include: {
             course: true,
-            teacher: { include: { user: true } },
+            teacher: { include: { user: { select: publicUserSelect } } },
             lessons: true,
             assignments: { where: { status: { not: 'DRAFT' } } },
           },
@@ -91,7 +92,7 @@ router.get(
         group: { 
           include: { 
             course: true,
-            teacher: { include: { user: true } }
+            teacher: { include: { user: { select: publicUserSelect } } }
           } 
         } 
       },
@@ -163,7 +164,7 @@ router.get(
             group: {
               include: {
                 course: true,
-                teacher: { include: { user: true } },
+                teacher: { include: { user: { select: publicUserSelect } } },
               },
             },
           },
@@ -199,49 +200,25 @@ router.get(
           ) / 10
         : 0;
 
-    const activities = [];
-    const achievements = [];
-    
-    try {
-      if (prisma.studentActivity) {
-        activities.push(...(await prisma.studentActivity.findMany({
-          where: { studentId },
-          orderBy: { createdAt: 'desc' },
-          take: 8,
-        })));
-      }
-    } catch (e) {
-      // Model might not be available
-    }
-    
-    try {
-      if (prisma.studentAchievement) {
-        achievements.push(...(await prisma.studentAchievement.findMany({
-          where: { studentId },
-          include: { achievement: true },
-          orderBy: { earnedAt: 'desc' },
-          take: 6,
-        })));
-      }
-    } catch (e) {
-      // Model might not be available
-    }
+    const activities = await prisma.studentActivity.findMany({
+      where: { studentId },
+      orderBy: { createdAt: 'desc' },
+      take: 8,
+    });
 
-    let announcements = [];
-    try {
-      if (prisma.announcement) {
-        announcements = await prisma.announcement.findMany({
-          where: {
-            groupId: { in: links.map((l) => l.group.id) },
-          },
-          include: { group: { include: { course: true } }, author: true },
-          orderBy: { createdAt: 'desc' },
-          take: 5,
-        });
-      }
-    } catch (e) {
-      // Model might not be available
-    }
+    const achievements = await prisma.studentAchievement.findMany({
+      where: { studentId },
+      include: { achievement: true },
+      orderBy: { earnedAt: 'desc' },
+      take: 6,
+    });
+
+    const announcements = await prisma.announcement.findMany({
+      where: { groupId: { in: links.map((l) => l.group.id) } },
+      include: { group: { include: { course: true } }, author: { select: publicUserSelect } },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+    });
 
     res.json(
       ok({
@@ -315,7 +292,7 @@ router.get(
         group: {
           include: {
             course: true,
-            teacher: { include: { user: true } },
+            teacher: { include: { user: { select: publicUserSelect } } },
             lessons: { orderBy: { startsAt: 'asc' } },
             assignments: { where: { status: { not: 'DRAFT' } }, orderBy: { deadline: 'asc' } },
           },
@@ -356,19 +333,12 @@ router.get(
       attendancePercent,
     });
 
-    let announcements = [];
-    try {
-      if (prisma.announcement) {
-        announcements = await prisma.announcement.findMany({
-          where: { groupId: link.group.id },
-          include: { author: true },
-          orderBy: { createdAt: 'desc' },
-          take: 20,
-        });
-      }
-    } catch (e) {
-      // Model might not be available
-    }
+    const announcements = await prisma.announcement.findMany({
+      where: { groupId: link.group.id },
+      include: { author: { select: publicUserSelect } },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
 
     const avg =
       grades.length > 0 ? grades.reduce((s, g) => s + g.score, 0) / grades.length : null;
@@ -409,7 +379,7 @@ router.get(
       where: { teacherId, status: { in: ['ACTIVE', 'ENROLLMENT'] } },
       include: {
         course: true,
-        _count: { select: { groupStudents: true } },
+        _count: { select: { groupStudents: { where: { status: 'ACTIVE' } } } },
       },
     });
 
@@ -428,7 +398,7 @@ router.get(
         group: { 
           include: { 
             course: true,
-            teacher: { include: { user: true } }
+            teacher: { include: { user: { select: publicUserSelect } } }
           } 
         } 
       },
@@ -443,7 +413,7 @@ router.get(
       },
       include: {
         assignment: { include: { course: true, group: true } },
-        student: { include: { user: true } },
+        student: { include: { user: { select: publicUserSelect } } },
       },
       take: 10,
     });
@@ -452,7 +422,7 @@ router.get(
     for (const g of groups) {
       const members = await prisma.groupStudent.findMany({
         where: { groupId: g.id, status: 'ACTIVE' },
-        include: { student: { include: { user: true } } },
+        include: { student: { include: { user: { select: publicUserSelect } } } },
       });
       for (const m of members) {
         const att = await prisma.attendance.findMany({
@@ -472,12 +442,32 @@ router.get(
         where: { submission: { assignment: { groupId: g.id } } },
       });
       const avg = grades.length ? grades.reduce((s, x) => s + x.score, 0) / grades.length : null;
+      const groupAttendance = await prisma.attendance.findMany({
+        where: { lesson: { groupId: g.id } },
+        select: { status: true },
+      });
+      const groupAttPct = groupAttendance.length
+        ? (groupAttendance.filter((a) => isPresentStatus(a.status)).length / groupAttendance.length) * 100
+        : 0;
       groupStats.push({
         group: g,
         averageGrade: avg ? Math.round(avg * 10) / 10 : null,
         students: g._count.groupStudents,
+        attendancePercent: Math.round(groupAttPct * 10) / 10,
       });
     }
+
+    const dayStart = new Date();
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date();
+    dayEnd.setHours(23, 59, 59, 999);
+    const lessonsToday = await prisma.lesson.count({
+      where: {
+        groupId: { in: groupIds },
+        startsAt: { gte: dayStart, lte: dayEnd },
+        status: { not: 'CANCELLED' },
+      },
+    });
 
     const activeAssignments = await prisma.assignment.count({
       where: {
@@ -509,10 +499,7 @@ router.get(
         upcomingLessons,
         toReview,
         lowAttendance: lowAttendance.slice(0, 10),
-        groupStats: groupStats.map((gs) => ({
-          ...gs,
-          attendancePercent: gs.attendancePercent || 0,
-        })),
+        groupStats,
         lessonsToday,
         activeAssignments,
         averageAttendance: Math.round(teacherAttendance * 10) / 10,
@@ -534,10 +521,10 @@ router.get(
       where: { id: req.params.groupId },
       include: {
         course: true,
-        teacher: { include: { user: true } },
+        teacher: { include: { user: { select: publicUserSelect } } },
         groupStudents: {
           where: { status: 'ACTIVE' },
-          include: { student: { include: { user: true } } },
+          include: { student: { include: { user: { select: publicUserSelect } } } },
         },
         lessons: { orderBy: { startsAt: 'asc' } },
         assignments: { orderBy: { deadline: 'asc' } },
@@ -619,18 +606,10 @@ router.get(
     const weekEnd = new Date(startOfDay.getTime() + 7 * 86400000);
 
     const lessonsToday = await prisma.lesson.count({
-      where: { 
-        groupId: { in: groupIds },
-        startsAt: { gte: startOfDay, lte: endOfDay }, 
-        status: { not: 'CANCELLED' } 
-      },
+      where: { startsAt: { gte: startOfDay, lte: endOfDay }, status: { not: 'CANCELLED' } },
     });
     const lessonsWeek = await prisma.lesson.count({
-      where: { 
-        groupId: { in: groupIds },
-        startsAt: { gte: startOfDay, lte: weekEnd }, 
-        status: { not: 'CANCELLED' } 
-      },
+      where: { startsAt: { gte: startOfDay, lte: weekEnd }, status: { not: 'CANCELLED' } },
     });
 
     const attendance = await prisma.attendance.findMany();
@@ -644,7 +623,7 @@ router.get(
 
     const teacherLoad = await prisma.teacher.findMany({
       include: {
-        user: true,
+        user: { select: publicUserSelect },
         groups: { where: { status: { in: ['ACTIVE', 'ENROLLMENT'] } } },
       },
     });
