@@ -1,0 +1,8 @@
+87-228-40-247.sslip.io {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:3000
+}
+
+http://87.228.40.247 {
+	redir https://87-228-40-247.sslip.io{uri}
+}

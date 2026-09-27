@@ -49,6 +49,17 @@ npm run dev
 Браузер обращается к API через тот же адрес: Next.js проксирует `/api` и `/uploads` на бэкенд
 (`BACKEND_URL`, по умолчанию `http://localhost:4000`), поэтому cookie входа работает на любом домене.
 
+### Сервер (VDS)
+
+Сайт развёрнут на VDS (AlmaLinux 9): **https://87-228-40-247.sslip.io**
+
+- Caddy (HTTPS, Let's Encrypt) → Next.js `127.0.0.1:3000` → Express `127.0.0.1:4000`, службы systemd
+  `somon-web`, `somon-api`, `caddy` стартуют автоматически. Конфиги — в папке `deploy/`.
+- Данные сервера: `/opt/somon/backend.env` (секреты), `backend/prisma/prod.db`, `/opt/somon/uploads`.
+- Вход по SSH только по ключу `~/.ssh/somon_vds`.
+- Обновить сайт после коммита: `powershell -ExecutionPolicy Bypass -File .\deploy\deploy-vds.ps1`
+  (база и загруженные файлы сохраняются).
+
 ### Показать проект по публичной ссылке
 
 ```powershell

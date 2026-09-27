@@ -1,0 +1,15 @@
+[Unit]
+Description=Somon Web (Next.js)
+After=network.target somon-api.service
+
+[Service]
+User=somon
+WorkingDirectory=/opt/somon/app/frontend
+Environment=NODE_ENV=production
+Environment=NEXT_TELEMETRY_DISABLED=1
+ExecStart=/usr/bin/node node_modules/next/dist/bin/next start -p 3000 -H 127.0.0.1
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
