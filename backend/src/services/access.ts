@@ -95,9 +95,22 @@ export async function assertCanReadSubmission(user: AuthUser, submissionId: stri
   return submission;
 }
 
+/** Lessons conducted by the teacher: explicitly assigned, or of their groups when no substitute is set. */
+export function lessonsOfTeacherWhere(teacherId: string): Prisma.LessonWhereInput {
+  return { OR: [{ teacherId }, { teacherId: null, group: { teacherId } }] };
+}
+
+function describeConflict(l: { title: string; startsAt: Date; endsAt: Date; group: { code: string } }) {
+  const t = (d: Date) => d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: process.env.APP_TIMEZONE || undefined });
+  const day = l.startsAt.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', timeZone: process.env.APP_TIMEZONE || undefined });
+  return `«${l.title}» (${l.group.code}, ${day} ${t(l.startsAt)}–${t(l.endsAt)})`;
+}
+
+/** Rejects overlapping lessons of the same group, teacher or classroom. `teacherId` is the teacher who conducts the lesson. */
 export async function checkScheduleConflict(params: {
   groupId: string;
   teacherId?: string | null;
+  classroomId?: string | null;
   startsAt: Date;
   endsAt: Date;
   excludeLessonId?: string;
@@ -105,37 +118,34 @@ export async function checkScheduleConflict(params: {
   if (params.endsAt <= params.startsAt) {
     throw new AppError('Время окончания должно быть позже начала', 400, 'INVALID_TIME');
   }
+  if (params.endsAt.getTime() - params.startsAt.getTime() > 12 * 3600 * 1000) {
+    throw new AppError('Занятие не может длиться дольше 12 часов', 400, 'INVALID_TIME');
+  }
 
-  const groupLessons = await prisma.lesson.findMany({
-    where: {
-      groupId: params.groupId,
-      status: { not: 'CANCELLED' },
-      id: params.excludeLessonId ? { not: params.excludeLessonId } : undefined,
-      startsAt: { lt: params.endsAt },
-      endsAt: { gt: params.startsAt },
-    },
-  });
-  if (groupLessons.length) {
-    throw new AppError('Конфликт расписания у группы', 409, 'SCHEDULE_CONFLICT');
+  const overlap: Prisma.LessonWhereInput = {
+    status: { not: 'CANCELLED' },
+    id: params.excludeLessonId ? { not: params.excludeLessonId } : undefined,
+    startsAt: { lt: params.endsAt },
+    endsAt: { gt: params.startsAt },
+  };
+  const select = { title: true, startsAt: true, endsAt: true, group: { select: { code: true } } } as const;
+
+  const groupClash = await prisma.lesson.findFirst({ where: { ...overlap, groupId: params.groupId }, select });
+  if (groupClash) {
+    throw new AppError(`У группы в это время уже есть занятие ${describeConflict(groupClash)}`, 409, 'SCHEDULE_CONFLICT');
   }
 
   if (params.teacherId) {
-    const teacherGroups = await prisma.group.findMany({
-      where: { teacherId: params.teacherId },
-      select: { id: true },
-    });
-    const ids = teacherGroups.map((g) => g.id);
-    const teacherLessons = await prisma.lesson.findMany({
-      where: {
-        groupId: { in: ids },
-        status: { not: 'CANCELLED' },
-        id: params.excludeLessonId ? { not: params.excludeLessonId } : undefined,
-        startsAt: { lt: params.endsAt },
-        endsAt: { gt: params.startsAt },
-      },
-    });
-    if (teacherLessons.length) {
-      throw new AppError('Конфликт расписания у преподавателя', 409, 'SCHEDULE_CONFLICT');
+    const teacherClash = await prisma.lesson.findFirst({ where: { AND: [overlap, lessonsOfTeacherWhere(params.teacherId)] }, select });
+    if (teacherClash) {
+      throw new AppError(`Преподаватель в это время ведёт занятие ${describeConflict(teacherClash)}`, 409, 'SCHEDULE_CONFLICT');
+    }
+  }
+
+  if (params.classroomId) {
+    const roomClash = await prisma.lesson.findFirst({ where: { ...overlap, classroomId: params.classroomId }, select });
+    if (roomClash) {
+      throw new AppError(`Аудитория в это время занята: ${describeConflict(roomClash)}`, 409, 'SCHEDULE_CONFLICT');
     }
   }
 }

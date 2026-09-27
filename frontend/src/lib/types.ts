@@ -132,6 +132,29 @@ export type LessonCard = {
   classroom?: { id: string; name: string } | null;
 };
 
+export type ScheduleLesson = LessonCard & {
+  groupId: string;
+  teacherId?: string | null;
+  branchId?: string | null;
+  classroomId?: string | null;
+  _count?: { attendance: number; materials: number };
+};
+
+export type LessonDetail = ScheduleLesson & {
+  group: LessonCard['group'] & { teacherId?: string | null; groupStudents: { student: { id: string; user: PersonRef } }[] };
+  branch?: { id: string; name: string; address: string; phone?: string | null } | null;
+  classroom?: { id: string; name: string; capacity?: number | null } | null;
+  attendance: { studentId: string; status: string; note?: string | null }[];
+  materials: { id: string; title: string; type: string; videoUrl?: string | null; linkUrl?: string | null; files: StoredFileInfo[] }[];
+  assignments: { id: string; title: string; deadline?: string | null; status: string; maxScore: number }[];
+};
+
+export type BranchWithRooms = Branch & {
+  isActive: boolean;
+  classrooms: { id: string; name: string; capacity?: number | null; _count?: { lessons: number } }[];
+  _count?: { classrooms: number; lessons: number };
+};
+
 export type StoredFileInfo = { id: string; originalName: string; size: number; mimeType: string; createdAt?: string };
 
 export type GradeInfo = {

@@ -84,6 +84,7 @@ const NAV: Record<Role, NavSection[]> = {
     {
       title: 'Центр',
       items: [
+        { href: '/admin/branches', label: 'Филиалы', icon: '🏫' },
         { href: '/admin/statistics', label: 'Статистика', icon: '📊' },
         { href: '/admin/settings', label: 'Настройки', icon: '⚙️' },
       ],

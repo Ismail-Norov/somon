@@ -20,6 +20,7 @@ import teachersRoutes from './routes/teachers';
 import publicRoutes from './routes/public';
 import newsRoutes from './routes/news';
 import settingsRoutes from './routes/settings';
+import branchesRoutes from './routes/branches';
 import { errorHandler } from './middleware/error';
 import { requireAuth } from './middleware/auth';
 import { ok } from './lib/errors';
@@ -80,6 +81,7 @@ export function createApp() {
   app.use('/api/public', publicRoutes);
   app.use('/api/news', newsRoutes);
   app.use('/api/settings', settingsRoutes);
+  app.use('/api/branches', branchesRoutes);
 
   app.use(errorHandler);
   return app;
