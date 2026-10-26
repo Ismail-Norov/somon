@@ -10,3 +10,14 @@ backend/.env
 frontend/.env.local
 .DS_Store
 *.log
+
+# Database files and backups
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.db.bak
+*.sqlite.bak
+
+# TypeScript build cache
+*.tsbuildinfo
